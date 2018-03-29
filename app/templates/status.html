@@ -1,0 +1,54 @@
+{% extends "base.html" %} {% block main %}
+<div style="margin-top: 50px">
+
+    {% if not alerts %}
+    <div style="text-align: center" class="alert alert-success" role="alert">
+        <h4>All systems ok!</h4>
+    </div>
+    {% else %}
+    <table style="font-size: 14px" class="table table-sm table-bordered">
+        <thead class="thead-dark">
+            <tr>
+                <th>Last report</th>
+                <th>Id</th>
+                {% if group_tag %}
+                <th>{{ group_tag | title }}</th>
+                {% endif %}
+                <th>Duration</th>
+                <th>Level</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in alerts.values() | sort(reverse=True, attribute='time') %}
+            {% if a.level == 'CRITICAL' %}
+            <tr class="table-danger">
+            {% else %}
+            <tr class="table-warning">
+            {% endif %}
+                <td>{{ a.time }}</td>
+                <td>{{ a.id }}</td>
+                {% if group_tag %}
+                {% for tag in a.tags if tag.key == group_tag %}
+                <td>{{ tag.value }}</td>
+                {% else %}
+                <td>-</td>
+                {% endfor %}
+                {% endif %}
+                <td class="text-right">{{ a.duration | timedelta }}</td>
+                <td>{{ a.level }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="text-align: right">
+        <small>All displayed times are local to the server</small>
+    <div>
+    {% endif %}
+</div>
+
+<script type="text/javascript">
+    setInterval(function() {
+          window.location.reload();
+        }, 30000);
+</script>
+{% endblock %}

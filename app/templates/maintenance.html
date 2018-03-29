@@ -1,0 +1,67 @@
+{% extends "base.html" %} {% block main %}
+<div style="margin-top: 50px">
+    <form class="form-inline" action="" method="POST">
+        <div class="row">
+            {{ af.csrf_token }}
+            <div class="col-md-auto">
+                <legend>Activate maintenance</legend>
+            </div>
+            <div class="col-md-auto">
+                {{ af.key(class='custom-select') }}
+            </div>
+            <div class="col">
+                {{ af.val(size='30', class='form-control', placeholder='Value') }}
+                {% for error in af.val.errors %}
+                <span style="color: red"><small>{{ error }}</small></span>
+                {% endfor %}
+            </div>
+            <div class="col">
+                {{ af.duration(size='8', class='form-control', placeholder='Duration') }}
+                {% for error in af.duration.errors %}
+                <span style="color: red"><small>{{ error }}</small></span>
+                {% endfor %}
+            </div>
+            <div class="col-md-auto">
+                {{ af.submit(class='btn btn-primary') }}
+            </div>
+        </div>
+    </form>
+</div>
+
+{% if mrules | length > 0 %}
+<div style="margin-top: 10px">
+    <table class="table table-sm table-bordered table-striped">
+        <thead class="thead-dark">
+            <tr>
+                <th>Tag</th>
+                <th>Value</th>
+                <th>Start</th>
+                <th>Stop</th>
+                <th>Delete</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rule in mrules %}
+            <tr>
+                <td>{{ rule.key | title }}</td>
+                <td>{{ rule.value }}</td>
+                <td>{{ rule.start | ctime }}</td>
+                <td>{{ rule.stop  | ctime}}</td>
+                <td style="text-align: center">
+                    <form action="" method="POST">
+                        {{ df.csrf_token }}
+                        {{ df.start(value=rule.start) }}
+                        {{ df.stop(value=rule.stop) }}
+                        {{ df.submit(class="btn btn-sm btn-danger") }}
+                    </form>
+                </td>
+                {% endfor %}
+        </tbody>
+    </table>
+    <div style="text-align: right">
+        <small>All displayed times are local to the server</small>
+    <div>
+</div>
+{% endif %}
+
+{% endblock %}
