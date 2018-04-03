@@ -11,7 +11,8 @@ app = Flask(__name__)
 app.config.from_object(Config)
 app.secret_key = app.config['SECRET_KEY']
 
-INSTALLDIR = os.path.dirname(os.path.abspath(__package__))
+INSTALLDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          os.path.pardir)
 
 LOGGER = logging.getLogger(name="KAP")
 _file_handler = logging.handlers.RotatingFileHandler(

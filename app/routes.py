@@ -75,7 +75,12 @@ def format_secs(s):
 def add_to_active(al):
     alhash = hashlib.sha256(
         al.id.encode() + str(al.tags).encode()).hexdigest()
-    if al.level != 'OK':
+    LOGGER.debug('Alert hash: %s', alhash)
+    if al.level != 'OK' and alhash in ACTIVE_ALERTS:
+        LOGGER.debug("Updating active alert")
+        ACTIVE_ALERTS[alhash] = al
+    elif al.level != 'OK' and alhash not in ACTIVE_ALERTS:
+        LOGGER.debug("Setting new active alert")
         ACTIVE_ALERTS[alhash] = al
     elif al.level == 'OK' and alhash in ACTIVE_ALERTS:
         del ACTIVE_ALERTS[alhash]
@@ -153,8 +158,17 @@ def load_mrules():
 def affected_by_mrules(mrules, al):
     LOGGER.debug("Checking maintenance")
     for mrule in mrules:
+        mrv = mrule['value']
         v = [tag['value'] for tag in al.tags if tag['key'] == mrule['key']]
-        if mrule['value'] in v:
+        if mrv in v:
             LOGGER.info("In maintenance")
+            return True
+        elif mrv[0] == '*' and v[0].endswith(mrv[1:]):
+            LOGGER.info("In maintenance")
+            LOGGER.debug("Affected by rule wildcard *endswith")
+            return True
+        elif mrv[-1] == '*' and v[0].startswith(mrv[:-1]):
+            LOGGER.info("In maintenance")
+            LOGGER.debug("Affected by rule wildcard startswith*")
             return True
     return False

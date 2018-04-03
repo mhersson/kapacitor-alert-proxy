@@ -21,7 +21,8 @@ class Slack(object):
 
     def _create_message(self, alert):
         LOGGER.debug("Creating slack json message")
-        colors = {"OK": "good", "WARNING": "warning", "CRITICAL": "danger"}
+        colors = {"OK": "good", "INFO": "#439FE0",
+                  "WARNING": "warning", "CRITICAL": "danger"}
 
         slack_json = {"username": self._username,
                       "channel": self._channel,
