@@ -21,7 +21,9 @@ class Config(object):
     MAIN_GROUP_TAG = 'Environment'
 
     # Maintenance tags (value, displayed text)
-    MAINTENANCE_TAGS = [('Environment', 'Environment'), ('host', 'Host')]
+    MAINTENANCE_TAGS = [('Environment', 'Environment'),
+                        ('host', 'Host'),
+                        ('id', 'Id')]   # This is the alert id
 
     # Slack
     SLACK_ENABLED = False

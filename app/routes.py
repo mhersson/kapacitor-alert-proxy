@@ -57,9 +57,14 @@ def maintenance():
 
 @app.route("/kap/status", methods=['GET'])
 def status():
+    mrules = load_mrules()
+    aim = []
+    for a in ACTIVE_ALERTS:
+        if affected_by_mrules(mrules=mrules, al=ACTIVE_ALERTS[a]):
+            aim.append(ACTIVE_ALERTS[a])
     return render_template('status.html', title="Active alerts",
                            group_tag=app.config['MAIN_GROUP_TAG'],
-                           alerts=ACTIVE_ALERTS)
+                           alerts=ACTIVE_ALERTS, maintenance=aim)
 
 
 @app.template_filter('ctime')
@@ -171,4 +176,7 @@ def affected_by_mrules(mrules, al):
             LOGGER.info("In maintenance")
             LOGGER.debug("Affected by rule wildcard startswith*")
             return True
+        if mrule['key'] == 'id':
+            if al.id.endswith(mrule['value']):
+                return True
     return False

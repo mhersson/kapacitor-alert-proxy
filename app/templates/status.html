@@ -1,6 +1,12 @@
 {% extends "base.html" %} {% block main %}
 <div style="margin-top: 50px">
 
+  <div style="height: 50px; text-align: center;">
+    <div class="h-50 d-inline-block alert-primary" style="width: 130px">MAINTENANCE</div>
+    <div class="h-50 d-inline-block alert-info" style="width: 130px">INFO</div>
+    <div class="h-50 d-inline-block alert-warning" style="width: 130px">WARNING</div>
+    <div class="h-50 d-inline-block alert-danger" style="width: 130px">CRITICAL</div>
+  </div>
     {% if not alerts %}
     <div style="text-align: center" class="alert alert-success" role="alert">
         <h4>All systems ok!</h4>
@@ -20,10 +26,16 @@
         </thead>
         <tbody>
             {% for a in alerts.values() | sort(reverse=True, attribute='time') %}
-            {% if a.level == 'CRITICAL' %}
-            <tr class="table-danger">
+            {% if a in maintenance %}
+            <tr class="table-primary">
             {% else %}
-            <tr class="table-warning">
+              {% if a.level == 'CRITICAL' %}
+              <tr class="table-danger">
+              {% elif a.level == 'WARNING' %}
+              <tr class="table-warning">
+              {% elif a.level == 'INFO' %}
+              <tr class="table-info">
+              {% endif %}
             {% endif %}
                 <td>{{ a.time }}</td>
                 <td>{{ a.id }}</td>
