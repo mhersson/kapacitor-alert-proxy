@@ -33,5 +33,14 @@ class Config(object):
     SLACK_USERNAME = "kapacitor"
     # Only send alerts when the state changes
     SLACK_STATE_CHANGE_ONLY = True
-    # Send alerts to slack even if maintenance is sat
+    # Send alerts to slack even during maintenance
     SLACK_IGNORE_MAINTENANCE = False
+
+    # Pagerduty
+    PAGERDUTY_ENABLED = False
+    PAGERDUTY_URL = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"  # noqa
+    PAGERDUTY_SERVICE_KEY = ""
+    # Only send events when the alert state changes
+    PAGERDUTY_STATE_CHANGE_ONLY = True
+    # Send events to pagerduty even during maintenance
+    PAGERDUTY_IGNORE_MAINTENANCE = False

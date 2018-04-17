@@ -12,30 +12,44 @@ import json
 import time
 import hashlib
 from datetime import datetime, timedelta
-from collections import namedtuple
 from flask import Response, request, render_template, redirect
 
 from app import app, LOGGER, INSTALLDIR
+from app.alert import Alert
 from app.targets.slack import Slack
+from app.targets.pagerduty import Pagerduty
 from app.forms.maintenance import ActivateForm, DeactivateForm
 
 ACTIVE_ALERTS = {}
 
-slack = Slack(url=app.config['SLACK_URL'], channel=app.config['SLACK_CHANNEL'],
-              username=app.config['SLACK_USERNAME'],
-              state_change_only=app.config['SLACK_STATE_CHANGE_ONLY'])
+slack = Slack(
+    url=app.config['SLACK_URL'],
+    channel=app.config['SLACK_CHANNEL'],
+    username=app.config['SLACK_USERNAME'],
+    state_change_only=app.config['SLACK_STATE_CHANGE_ONLY'])
+
+pagerduty = Pagerduty(
+    url=app.config['PAGERDUTY_URL'],
+    service_key=app.config['PAGERDUTY_SERVICE_KEY'],
+    state_change_only=app.config['PAGERDUTY_STATE_CHANGE_ONLY'])
 
 
 @app.route("/kap/alert", methods=['post'])
 def alert():
     LOGGER.debug("Received new data")
     al = create_alert(request.json)
-    add_to_active(al)
+    al.pd_incident_key = get_pagerduty_incident_key(al)
     mrules = load_mrules()
     if app.config['SLACK_ENABLED'] and (
             not affected_by_mrules(mrules, al) or
             app.config['SLACK_IGNORE_MAINTENANCE']):
         slack.post(al)
+    if app.config['PAGERDUTY_ENABLED'] and (
+            not affected_by_mrules(mrules, al) or
+            app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
+        al.pd_incident_key = pagerduty.post(al)
+        LOGGER.debug("Pagerduty incident key: %s", al.pd_incident_key)
+    modify_active(al)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
 
@@ -77,10 +91,40 @@ def format_secs(s):
     return timedelta(seconds=s)
 
 
-def add_to_active(al):
-    alhash = hashlib.sha256(
-        al.id.encode() + str(al.tags).encode()).hexdigest()
+def create_alert(content):
+    LOGGER.debug("Creating alert")
+    tags = []
+    for s in content['data']['series']:
+        tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
+
+    al = Alert(
+        alertid=content['id'],
+        duration=content['duration'] // (10 ** 9),
+        message=content['message'],
+        level=content['level'],
+        previouslevel=content['previousLevel'],
+        alerttime=datestr_to_datetime(datestr=content['time']),
+        tags=tags)
+    LOGGER.debug(al)
+    return al
+
+
+def datestr_to_datetime(datestr):
+    m = re.match(
+        "20[0-9]{2}-[0-2][0-9]-[0-3][0-9]T[0-2][0-9](:[0-5][0-9]){2}", datestr)
+    if m:
+        return datetime.strptime(m.group(0), '%Y-%m-%dT%H:%M:%S')
+    return None
+
+
+def get_hash(al):
+    alhash = hashlib.sha256(al.id.encode() + str(al.tags).encode()).hexdigest()
     LOGGER.debug('Alert hash: %s', alhash)
+    return alhash
+
+
+def modify_active(al):
+    alhash = get_hash(al)
     if al.level != 'OK' and alhash in ACTIVE_ALERTS:
         LOGGER.debug("Updating active alert")
         ACTIVE_ALERTS[alhash] = al
@@ -89,6 +133,16 @@ def add_to_active(al):
         ACTIVE_ALERTS[alhash] = al
     elif al.level == 'OK' and alhash in ACTIVE_ALERTS:
         del ACTIVE_ALERTS[alhash]
+
+
+def get_pagerduty_incident_key(al):
+    alhash = get_hash(al)
+    if alhash in ACTIVE_ALERTS:
+        existing = ACTIVE_ALERTS[alhash]
+        if existing.pd_incident_key:
+            LOGGER.info("Found existing incident key")
+            return existing.pd_incident_key
+    return None
 
 
 def activate_maintenance(key, val, duration):
@@ -102,7 +156,7 @@ def activate_maintenance(key, val, duration):
         with open(os.path.join(INSTALLDIR, "maintenance", filename), 'w') as f:
             f.write(json.dumps(rule))
     except OSError:
-        LOGGER.error("Failed to set maintenance")
+        LOGGER.error("Failed to activate maintenance")
 
 
 def deactive_maintenance(start, stop):
@@ -111,36 +165,7 @@ def deactive_maintenance(start, stop):
     try:
         os.remove(os.path.join(INSTALLDIR, "maintenance", filename))
     except OSError:
-        LOGGER.error("Failed to deactive maintenance")
-
-
-def create_alert(content):
-    LOGGER.debug("Creating alert")
-    tags = []
-    for s in content['data']['series']:
-        tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
-
-    Alert = namedtuple(
-        'Alert', 'id, tags, duration, message, level, previouslevel, time')
-
-    a = Alert(
-        id=content['id'],
-        duration=content['duration'] // (10 ** 9),
-        message=content['message'],
-        level=content['level'],
-        previouslevel=content['previousLevel'],
-        time=datestr_to_datetime(datestr=content['time']),
-        tags=tags)
-    LOGGER.debug(a)
-    return a
-
-
-def datestr_to_datetime(datestr):
-    m = re.match(
-        "20[0-9]{2}-[0-2][0-9]-[0-3][0-9]T[0-2][0-9](:[0-5][0-9]){2}", datestr)
-    if m:
-        return datetime.strptime(m.group(0), '%Y-%m-%dT%H:%M:%S')
-    return None
+        LOGGER.error("Failed to deactivate maintenance")
 
 
 def load_mrules():
