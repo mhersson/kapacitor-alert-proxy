@@ -1,0 +1,35 @@
+{% extends "base.html" %} {% block main %}
+<div style="margin-top: 50px">
+
+    {% if not stats %}
+    <div style="text-align: center" class="alert alert-success" role="alert">
+        <h4>No statistics to show</h4>
+    </div>
+    {% else %}
+    <table style="font-size: 14px" class="table table-sm table-bordered">
+        <thead class="thead-dark">
+            <tr>
+                <th>Id</th>
+                <th>Count</th>
+                <th>Average Duration</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in stats.values() | sort(reverse=True, attribute='count') %}
+            <tr>
+                <td>{{ a.id }}</td>
+                <td class="text-right">{{ a.count }}</td>
+                <td class="text-right">{{ a.duration | timedelta }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+
+<script type="text/javascript">
+    setInterval(function() {
+          window.location.reload();
+        }, 30000);
+</script>
+{% endblock %}

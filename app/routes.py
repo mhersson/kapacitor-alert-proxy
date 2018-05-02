@@ -21,6 +21,7 @@ from app.targets.pagerduty import Pagerduty
 from app.forms.maintenance import ActivateForm, DeactivateForm
 
 ACTIVE_ALERTS = {}
+STATISTICS = {}
 
 slack = Slack(
     url=app.config['SLACK_URL'],
@@ -81,6 +82,12 @@ def status():
                            alerts=ACTIVE_ALERTS, maintenance=aim)
 
 
+@app.route("/kap/statistics", methods=['GET'])
+def statistics():
+    return render_template('statistics.html', title="Statistics",
+                           stats=STATISTICS)
+
+
 @app.template_filter('ctime')
 def timectime(s):
     return time.ctime(s)
@@ -133,6 +140,18 @@ def modify_active(al):
         ACTIVE_ALERTS[alhash] = al
     elif al.level == 'OK' and alhash in ACTIVE_ALERTS:
         del ACTIVE_ALERTS[alhash]
+        add_statistics(alhash, al)
+
+
+def add_statistics(alhash, al):
+    if alhash in STATISTICS:
+        stats = STATISTICS[alhash]
+        stats["count"] += 1
+        stats["duration"] = stats["duration"] + ((
+            al.duration - stats["duration"]) / stats["count"])
+        STATISTICS[alhash] = stats
+    else:
+        STATISTICS[alhash] = {"id": al.id, "count": 1, "duration": al.duration}
 
 
 def get_pagerduty_incident_key(al):
