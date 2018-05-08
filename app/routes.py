@@ -18,6 +18,7 @@ from app import app, LOGGER, INSTALLDIR
 from app.alert import Alert
 from app.targets.slack import Slack
 from app.targets.pagerduty import Pagerduty
+from app.targets.jira import Incident
 from app.forms.maintenance import ActivateForm, DeactivateForm
 
 ACTIVE_ALERTS = {}
@@ -33,6 +34,12 @@ pagerduty = Pagerduty(
     url=app.config['PAGERDUTY_URL'],
     service_key=app.config['PAGERDUTY_SERVICE_KEY'],
     state_change_only=app.config['PAGERDUTY_STATE_CHANGE_ONLY'])
+
+jira = Incident(
+    server=app.config['JIRA_SERVER'],
+    username=app.config['JIRA_USERNAME'],
+    password=app.config['JIRA_PASSWORD'],
+    project_key=app.config['JIRA_PROJECT_KEY'])
 
 
 @app.route("/kap/alert", methods=['post'])
@@ -50,6 +57,9 @@ def alert():
             app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
         al.pd_incident_key = pagerduty.post(al)
         LOGGER.debug("Pagerduty incident key: %s", al.pd_incident_key)
+    if app.config['JIRA_ENABLED'] and not affected_by_mrules(mrules, al):
+        al.jira_issue = jira.post(al)
+        LOGGER.debug("JIRA issue: %s", al.jira_issue)
     modify_active(al)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
