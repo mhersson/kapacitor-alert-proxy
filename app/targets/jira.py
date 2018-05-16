@@ -98,10 +98,9 @@ class Incident(object):
             self._close(jira, issue)
 
     def post(self, alert):
-        key = None
         if alert.level != alert.previouslevel:
-            if alert.level == 'CRITICAL':
-                key = self._create(alert)
+            if alert.level == 'CRITICAL' and alert.jira_issue is None:
+                alert.jira_issue = self._create(alert)
             elif alert.level != 'CRITICAL' and alert.jira_issue is not None:
                 self._resolve_and_close(key=alert.jira_issue)
-        return key
+        return alert.jira_issue

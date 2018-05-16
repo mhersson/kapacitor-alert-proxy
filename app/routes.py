@@ -154,18 +154,34 @@ def modify_active(al):
         ACTIVE_ALERTS[alhash] = al
     elif al.level == 'OK' and alhash in ACTIVE_ALERTS:
         del ACTIVE_ALERTS[alhash]
-        add_statistics(alhash, al)
+    if al.level != al.previouslevel:
+        update_statistics(alhash, al)
 
 
-def add_statistics(alhash, al):
+def update_statistics(alhash, al):
+    LOGGER.debug("Updating statistics")
     if alhash in STATISTICS:
+        now = int(time.time())
         stats = STATISTICS[alhash]
-        stats["count"] += 1
-        stats["duration"] = stats["duration"] + ((
-            al.duration - stats["duration"]) / stats["count"])
+        plevel = stats[al.previouslevel]
+        plevel["count"] += 1
+        plevel["duration"] = plevel["duration"] + ((
+            (now - stats['timestamp']) - plevel["duration"]) / plevel["count"])
+        stats[al.previouslevel] = plevel
+        stats['timestamp'] = now
         STATISTICS[alhash] = stats
     else:
-        STATISTICS[alhash] = {"id": al.id, "count": 1, "duration": al.duration}
+        if al.level != 'OK':
+            STATISTICS[alhash] = initialize_stats_counters(al)
+
+
+def initialize_stats_counters(al):
+    stats = {'id': al.id, 'timestamp': int(time.time()),
+             'OK': {'count': 0, 'duration': 0},
+             'INFO': {'count': 0, 'duration': 0},
+             'WARNING': {'count': 0, 'duration': 0},
+             'CRITICAL': {'count': 0, 'duration': 0}}
+    return stats
 
 
 def get_pagerduty_incident_key(al):
