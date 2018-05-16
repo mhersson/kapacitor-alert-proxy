@@ -51,3 +51,4 @@ class Config(object):
     JIRA_USERNAME = ""
     JIRA_PASSWORD = ""
     JIRA_PROJECT_KEY = ""
+    JIRA_ASSIGNEE = ""

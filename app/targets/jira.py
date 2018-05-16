@@ -14,12 +14,13 @@ from app import LOGGER
 
 
 class Incident(object):
-    def __init__(self, server, username, password, project_key):
+    def __init__(self, server, username, password, project_key, assignee):
         LOGGER.debug("Initiating jira incident")
         self._server = server
         self._username = username
         self._password = password
         self._project_key = project_key
+        self._assignee = assignee
 
     def _connect(self):
         LOGGER.debug("Connecting to JIRA")
@@ -36,8 +37,10 @@ class Incident(object):
         issue_dict = {'project': {'key': self._project_key},
                       'summary': alert.id,
                       'description': alert.message,
+                      # 'assignee': {'name': self._assignee},
+                      'components': [{'name': self._assignee}],
                       'issuetype': {'name': 'Incident'},
-                      'security': {'id': '10003'}}   # Create internal issue
+                      'security': {'name': 'Internal Issue'}}
         jira = self._connect()
         if jira:
             try:
