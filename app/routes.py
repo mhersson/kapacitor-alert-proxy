@@ -18,7 +18,10 @@ from app import app, LOGGER, INSTALLDIR
 from app.alert import Alert
 from app.targets.slack import Slack
 from app.targets.pagerduty import Pagerduty
+from app.targets.jira import Incident
 from app.forms.maintenance import ActivateForm, DeactivateForm
+
+STARTUP_TIME = time.time()
 
 ACTIVE_ALERTS = {}
 STATISTICS = {}
@@ -34,12 +37,20 @@ pagerduty = Pagerduty(
     service_key=app.config['PAGERDUTY_SERVICE_KEY'],
     state_change_only=app.config['PAGERDUTY_STATE_CHANGE_ONLY'])
 
+jira = Incident(
+    server=app.config['JIRA_SERVER'],
+    username=app.config['JIRA_USERNAME'],
+    password=app.config['JIRA_PASSWORD'],
+    project_key=app.config['JIRA_PROJECT_KEY'],
+    assignee=app.config['JIRA_ASSIGNEE'])
+
 
 @app.route("/kap/alert", methods=['post'])
 def alert():
     LOGGER.debug("Received new data")
     al = create_alert(request.json)
     al.pd_incident_key = get_pagerduty_incident_key(al)
+    al.jira_issue = get_jira_issue(al)
     mrules = load_mrules()
     if app.config['SLACK_ENABLED'] and (
             not affected_by_mrules(mrules, al) or
@@ -50,6 +61,9 @@ def alert():
             app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
         al.pd_incident_key = pagerduty.post(al)
         LOGGER.debug("Pagerduty incident key: %s", al.pd_incident_key)
+    if app.config['JIRA_ENABLED'] and not affected_by_mrules(mrules, al):
+        al.jira_issue = jira.post(al)
+        LOGGER.debug("JIRA issue: %s", al.jira_issue)
     modify_active(al)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
@@ -85,7 +99,7 @@ def status():
 @app.route("/kap/statistics", methods=['GET'])
 def statistics():
     return render_template('statistics.html', title="Statistics",
-                           stats=STATISTICS)
+                           stats=STATISTICS, startup_time=STARTUP_TIME)
 
 
 @app.template_filter('ctime')
@@ -161,6 +175,16 @@ def get_pagerduty_incident_key(al):
         if existing.pd_incident_key:
             LOGGER.info("Found existing incident key")
             return existing.pd_incident_key
+    return None
+
+
+def get_jira_issue(al):
+    alhash = get_hash(al)
+    if alhash in ACTIVE_ALERTS:
+        existing = ACTIVE_ALERTS[alhash]
+        if existing.jira_issue:
+            LOGGER.info("Found existing jira issue")
+            return existing.jira_issue
     return None
 
 

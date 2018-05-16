@@ -44,3 +44,11 @@ class Config(object):
     PAGERDUTY_STATE_CHANGE_ONLY = True
     # Send events to pagerduty even during maintenance
     PAGERDUTY_IGNORE_MAINTENANCE = False
+
+    # JIRA
+    JIRA_ENABLED = False
+    JIRA_SERVER = ""
+    JIRA_USERNAME = ""
+    JIRA_PASSWORD = ""
+    JIRA_PROJECT_KEY = ""
+    JIRA_ASSIGNEE = ""

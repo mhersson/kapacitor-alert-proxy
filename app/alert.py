@@ -18,11 +18,12 @@ class Alert(object):
         self.time = alerttime
         self.tags = tags
         self.pd_incident_key = None
+        self.jira_issue = None
 
     def __repr__(self):
         return ("Alert(id={}, duration={}, message={}, level={}, "
                 "previouslevel={}, time={}, tags={}, "
-                "pd_incident_key={})".format(
+                "pd_incident_key={}, jira_issue={})".format(
                     self.id,
                     self.duration,
                     self.message,
@@ -30,5 +31,6 @@ class Alert(object):
                     self.previouslevel,
                     self.time,
                     self.tags,
-                    self.pd_incident_key
+                    self.pd_incident_key,
+                    self.jira_issue
                 ))

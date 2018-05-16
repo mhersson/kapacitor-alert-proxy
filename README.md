@@ -2,8 +2,6 @@
 
 ## README
 
-** This project is just getting started **
-
 
 ## Goals
 * Add the ability to set instances or groups of instances in maintenance
@@ -34,3 +32,6 @@ Duration has to be set using this format: `<number>[d|h|m]`
 
 There is also a status page showing current active alerts
 `http://localhost:9095/kap/status`
+
+and a statistics page
+`http://localhost:9095/kap/statistics`

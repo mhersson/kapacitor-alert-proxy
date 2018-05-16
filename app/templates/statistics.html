@@ -6,6 +6,7 @@
         <h4>No statistics to show</h4>
     </div>
     {% else %}
+    <p style="text-align: right">Statistics collected since {{ startup_time | ctime }}</p>
     <table style="font-size: 14px" class="table table-sm table-bordered">
         <thead class="thead-dark">
             <tr>
