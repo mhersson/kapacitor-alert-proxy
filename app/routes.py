@@ -52,19 +52,10 @@ def alert():
     al.pd_incident_key = get_pagerduty_incident_key(al)
     al.jira_issue = get_jira_issue(al)
     mrules = load_mrules()
-    if app.config['SLACK_ENABLED'] and (
-            not affected_by_mrules(mrules, al) or
-            app.config['SLACK_IGNORE_MAINTENANCE']):
-        slack.post(al)
-    if app.config['PAGERDUTY_ENABLED'] and (
-            not affected_by_mrules(mrules, al) or
-            app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
-        al.pd_incident_key = pagerduty.post(al)
-        LOGGER.debug("Pagerduty incident key: %s", al.pd_incident_key)
-    if app.config['JIRA_ENABLED'] and not affected_by_mrules(mrules, al):
-        al.jira_issue = jira.post(al)
-        LOGGER.debug("JIRA issue: %s", al.jira_issue)
-    modify_active(al)
+    run_slack(mrules, al)
+    al.pd_incident_key = run_pagerduty(mrules, al)
+    al.jira_issue = run_jira(mrules, al)
+    update_active_alerts(al)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
 
@@ -109,7 +100,30 @@ def timectime(s):
 
 @app.template_filter('timedelta')
 def format_secs(s):
-    return timedelta(seconds=s)
+    return str(timedelta(seconds=s)).split(".")[0]
+
+
+def run_slack(mrules, al):
+    if app.config['SLACK_ENABLED'] and (
+            not affected_by_mrules(mrules, al) or
+            app.config['SLACK_IGNORE_MAINTENANCE']):
+        slack.post(al)
+
+
+def run_pagerduty(mrules, al):
+    if app.config['PAGERDUTY_ENABLED'] and (
+            not affected_by_mrules(mrules, al) or
+            app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
+        al.pd_incident_key = pagerduty.post(al)
+        LOGGER.debug("Pagerduty incident key: %s", al.pd_incident_key)
+    return al.pd_incident_key
+
+
+def run_jira(mrules, al):
+    if app.config['JIRA_ENABLED'] and not affected_by_mrules(mrules, al):
+        al.jira_issue = jira.post(al)
+        LOGGER.debug("JIRA issue: %s", al.jira_issue)
+    return al.jira_issue
 
 
 def create_alert(content):
@@ -144,7 +158,7 @@ def get_hash(al):
     return alhash
 
 
-def modify_active(al):
+def update_active_alerts(al):
     alhash = get_hash(al)
     if al.level != 'OK' and alhash in ACTIVE_ALERTS:
         LOGGER.debug("Updating active alert")

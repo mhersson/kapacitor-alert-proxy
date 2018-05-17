@@ -60,7 +60,9 @@
 
 <script type="text/javascript">
     setInterval(function() {
-          window.location.reload();
-        }, 30000);
+        if (!document.hidden) {
+            window.location.reload();
+        }
+    }, 30000);
 </script>
 {% endblock %}
