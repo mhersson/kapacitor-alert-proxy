@@ -1,0 +1,36 @@
+{% extends "base.html" %} {% block main %}
+<div style="margin-top: 50px">
+
+    {% if not ticks %}
+    <div style="text-align: center" class="alert alert-success" role="alert">
+        <h4>Nothing to show</h4>
+    </div>
+    {% else %}
+
+    <table style="font-size: 14px" class="table table-sm table-bordered">
+        <thead class="thead-dark">
+            <tr class="table-danger">
+                <th>Id</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Executing</th>
+                <th>Database and Retention Policy</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in ticks %}
+            <tr>
+                <td>{{ t[0] }}</td>
+                <td>{{ t[1] }}</td>
+                <td>{{ t[2] }}</td>
+                <td>{{ t[3] }}</td>
+                <td>{{ t[4] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% endif %}
+</div>
+
+{% endblock %}

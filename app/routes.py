@@ -11,6 +11,7 @@ import re
 import json
 import time
 import hashlib
+import subprocess
 from datetime import datetime, timedelta
 from flask import Response, request, render_template, redirect
 from influxdb import InfluxDBClient
@@ -98,6 +99,13 @@ def status():
 def statistics():
     return render_template('statistics.html', title="Statistics",
                            stats=STATISTICS, startup_time=STARTUP_TIME)
+
+
+@app.route("/kap/ticks", methods=['GET'])
+def ticks():
+    defined_ticks = get_defined_tick_scripts()
+    return render_template('ticks.html', title="Defined tick scripts",
+                           ticks=defined_ticks)
 
 
 @app.template_filter('ctime')
@@ -347,3 +355,14 @@ def affected_by_mrules(mrules, al):
             if al.id.endswith(mrule['value']):
                 return True
     return False
+
+
+def get_defined_tick_scripts():
+    defined_ticks = []
+    try:
+        byte_ticks = subprocess.check_output(['kapacitor', 'list', 'tasks'])
+        for t in byte_ticks.decode().split('\n')[1:-1]:
+            defined_ticks.append(t.split())
+    except subprocess.CalledProcessError:
+        LOGGER.error("Failed to list defined tick scripts")
+    return defined_ticks
