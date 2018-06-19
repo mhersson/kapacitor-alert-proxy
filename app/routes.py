@@ -13,6 +13,8 @@ import time
 import hashlib
 from datetime import datetime, timedelta
 from flask import Response, request, render_template, redirect
+from influxdb import InfluxDBClient
+from influxdb.exceptions import InfluxDBClientError
 
 from app import app, LOGGER, INSTALLDIR
 from app.alert import Alert
@@ -25,6 +27,10 @@ STARTUP_TIME = time.time()
 
 ACTIVE_ALERTS = {}
 STATISTICS = {}
+
+db = InfluxDBClient(host=app.config['INFLUXDB_HOST'],
+                    port=app.config['INFLUXDB_PORT'],
+                    database='kap')
 
 slack = Slack(
     url=app.config['SLACK_URL'],
@@ -56,6 +62,7 @@ def alert():
     al.pd_incident_key = run_pagerduty(mrules, al)
     al.jira_issue = run_jira(mrules, al)
     update_active_alerts(al)
+    update_influxdb(al)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
 
@@ -170,6 +177,68 @@ def update_active_alerts(al):
         del ACTIVE_ALERTS[alhash]
     if al.level != al.previouslevel:
         update_statistics(alhash, al)
+
+
+def update_influxdb(al):
+    if app.config['INFLUXDB_ENABLED'] is True:
+        if al.level != al.previouslevel:
+            LOGGER.debug("Updating InfluxDB")
+            update_db(influxify(al, "logs"))
+            if al.level == 'OK':
+                delete_active(al)
+            else:
+                update_db(influxify(al, "active", True))
+
+
+def update_db(data):
+    LOGGER.debug("Running insert or update")
+    try:
+        db.write_points([data])
+    except InfluxDBClientError as err:
+        LOGGER.error("Error(%s) - %s", err.code, err.content)
+
+
+def delete_active(al):
+    LOGGER.debug("Running delete series")
+    try:
+        db.delete_series(measurement="active", tags={"hash": get_hash(al)})
+    except InfluxDBClientError as err:
+        LOGGER.error("Error(%s) - %s", err.code, err.content)
+
+
+def influxify(al, measurement, zero_time=False):
+    LOGGER.debug("Creating InfluxDB json data")
+    # Used to count currently active alerts
+    if zero_time:
+        LOGGER.debug("Creating zero time data")
+        alhash = get_hash(al)
+        json_body = {
+            "measurement": measurement,
+            "tags": {
+                "hash": alhash},
+            "fields": {
+                "level": al.level,
+                "id": al.id},
+            "time": 0
+            }
+    else:
+        json_body = {
+            "measurement": measurement,
+            "tags": {
+                "id": al.id,
+                "level": al.level,
+                "previousLevel": al.previouslevel},
+            "fields": {
+                "id": al.id,
+                "duration": al.duration,
+                "message": al.message}
+            }
+        tags = json_body['tags']
+        for t in al.tags:
+            tags[t['key']] = t['value']
+        json_body['tags'] = tags
+
+    return json_body
 
 
 def update_statistics(alhash, al):

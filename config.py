@@ -25,6 +25,11 @@ class Config(object):
                         ('host', 'Host'),
                         ('id', 'Id')]   # This is the alert id
 
+    # Write stats to influxdb
+    INFLUXDB_ENABLED = True
+    INFLUXDB_HOST = 'localhost'
+    INFLUXDB_PORT = 8086
+
     # Slack
     SLACK_ENABLED = False
     # Slack incoming webhook url

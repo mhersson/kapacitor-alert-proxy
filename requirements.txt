@@ -1,3 +1,4 @@
 Flask>=1.0.2
 Flask-WTF>=0.14.2
 jira>=1.0.15
+influxdb>=5.0.0
