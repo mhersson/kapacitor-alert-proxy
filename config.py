@@ -49,6 +49,9 @@ class Config(object):
     PAGERDUTY_STATE_CHANGE_ONLY = True
     # Send events to pagerduty even during maintenance
     PAGERDUTY_IGNORE_MAINTENANCE = False
+    # List of tagkey tagvalue dictionaries that will not trigger an alert
+    PAGERDUTY_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
+                               {'key': 'Environment', 'value': 'staging'}]
 
     # JIRA
     JIRA_ENABLED = False
@@ -57,3 +60,6 @@ class Config(object):
     JIRA_PASSWORD = ""
     JIRA_PROJECT_KEY = ""
     JIRA_ASSIGNEE = ""
+    # List of tagkey tagvalue dictionaries that will not trigger an alert
+    JIRA_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
+                          {'key': 'Environment', 'value': 'staging'}]

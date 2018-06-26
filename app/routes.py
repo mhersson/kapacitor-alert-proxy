@@ -129,6 +129,9 @@ def run_pagerduty(mrules, al):
     if app.config['PAGERDUTY_ENABLED'] and (
             not affected_by_mrules(mrules, al) or
             app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
+        if contains_excluded_tags(
+                app.config['PAGERDUTY_EXCLUDED_TAGS'], al.tags):
+            return al.pd_incident_key
         al.pd_incident_key = pagerduty.post(al)
         LOGGER.debug("Pagerduty incident key: %s", al.pd_incident_key)
     return al.pd_incident_key
@@ -136,6 +139,8 @@ def run_pagerduty(mrules, al):
 
 def run_jira(mrules, al):
     if app.config['JIRA_ENABLED'] and not affected_by_mrules(mrules, al):
+        if contains_excluded_tags(app.config['JIRA_EXCLUDED_TAGS'], al.tags):
+            return al.jira_issue
         al.jira_issue = jira.post(al)
         LOGGER.debug("JIRA issue: %s", al.jira_issue)
     return al.jira_issue
@@ -168,7 +173,8 @@ def datestr_to_datetime(datestr):
 
 
 def get_hash(al):
-    alhash = hashlib.sha256(al.id.encode() + str(al.tags).encode()).hexdigest()
+    # alhash = hashlib.sha256(al.id.encode() + str(al.tags).encode()).hexdigest()
+    alhash = hashlib.sha256(al.id.encode()).hexdigest()
     LOGGER.debug('Alert hash: %s', alhash)
     return alhash
 
@@ -354,6 +360,16 @@ def affected_by_mrules(mrules, al):
         if mrule['key'] == 'id':
             if al.id.endswith(mrule['value']):
                 return True
+    return False
+
+
+def contains_excluded_tags(excluded, tags):
+    LOGGER.debug("Excluded: %s", str(excluded))
+    x = [t for t in tags if t in excluded]
+    if x:
+        LOGGER.debug("One or more tags in exclude list: %s", str(x))
+        return True
+    LOGGER.debug("No tags in exclude list")
     return False
 
 
