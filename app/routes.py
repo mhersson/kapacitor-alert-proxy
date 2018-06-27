@@ -369,6 +369,19 @@ def contains_excluded_tags(excluded, tags):
     if x:
         LOGGER.debug("One or more tags in exclude list: %s", str(x))
         return True
+    # MonGroup is a special tag we use
+    # that can have mulitple pipe separated values
+    x = [t['value'] for t in excluded if t['key'] == 'MonGroup']
+    if x:
+        # There is a MonGroup in the exclude list, so get MonGroup from tags
+        y = [t['value'] for t in tags if t['key'] == 'MonGroup']
+        if y:
+            # y should always have length 1 here if exists
+            # Split the value and
+            # create a new list to compare with the exclude list
+            if not set(x).isdisjoint(y[0].split("|")):
+                LOGGER.debug("Excluded MonGroup: %s", y[0])
+                return True
     LOGGER.debug("No tags in exclude list")
     return False
 
