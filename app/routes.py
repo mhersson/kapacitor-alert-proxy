@@ -132,6 +132,8 @@ def run_pagerduty(mrules, al):
         if contains_excluded_tags(
                 app.config['PAGERDUTY_EXCLUDED_TAGS'], al.tags):
             return al.pd_incident_key
+        if excluded_tick(al, app.config['PAGERDUTY_EXCLUDED_TICKS']):
+            return al.pd_incident_key
         al.pd_incident_key = pagerduty.post(al)
         LOGGER.debug("Pagerduty incident key: %s", al.pd_incident_key)
     return al.pd_incident_key
@@ -173,7 +175,6 @@ def datestr_to_datetime(datestr):
 
 
 def get_hash(al):
-    # alhash = hashlib.sha256(al.id.encode() + str(al.tags).encode()).hexdigest()
     alhash = hashlib.sha256(al.id.encode()).hexdigest()
     LOGGER.debug('Alert hash: %s', alhash)
     return alhash
@@ -383,6 +384,16 @@ def contains_excluded_tags(excluded, tags):
                 LOGGER.debug("Excluded MonGroup: %s", y[0])
                 return True
     LOGGER.debug("No tags in exclude list")
+    return False
+
+
+def excluded_tick(al, excluded_ticks):
+    # This only works if {{ .TaskName }} is the last element of the al.id
+    LOGGER.debug("Check for excluded tick script")
+    tn = al.id.split()[-1]
+    if tn in excluded_ticks:
+        LOGGER.debug("Tick %s is excluded", tn)
+        return True
     return False
 
 

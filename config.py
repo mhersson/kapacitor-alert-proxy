@@ -49,9 +49,11 @@ class Config(object):
     PAGERDUTY_STATE_CHANGE_ONLY = True
     # Send events to pagerduty even during maintenance
     PAGERDUTY_IGNORE_MAINTENANCE = False
-    # List of tagkey tagvalue dictionaries that will not trigger an alert
+    # List of tagkey tagkey/value dictionaries that will not trigger pagerduty
     PAGERDUTY_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
                                {'key': 'Environment', 'value': 'staging'}]
+    # List if tick scripts that will not trigger pagerduty
+    PAGERDUTY_EXCLUDED_TICKS = []
 
     # JIRA
     JIRA_ENABLED = False
