@@ -10,12 +10,15 @@ import os
 import re
 import json
 import time
+import boto3
 import hashlib
 import subprocess
 from datetime import datetime, timedelta
 from flask import Response, request, render_template, redirect
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
+from botocore.exceptions import NoCredentialsError, ProfileNotFound
+from botocore.exceptions import NoRegionError, ClientError
 
 from app import app, LOGGER, INSTALLDIR
 from app.alert import Alert
@@ -28,6 +31,7 @@ STARTUP_TIME = time.time()
 
 ACTIVE_ALERTS = {}
 STATISTICS = {}
+INSTANCES = {}
 
 db = InfluxDBClient(host=app.config['INFLUXDB_HOST'],
                     port=app.config['INFLUXDB_PORT'],
@@ -56,14 +60,15 @@ jira = Incident(
 def alert():
     LOGGER.debug("Received new data")
     al = create_alert(request.json)
-    al.pd_incident_key = get_pagerduty_incident_key(al)
-    al.jira_issue = get_jira_issue(al)
-    mrules = load_mrules()
-    run_slack(mrules, al)
-    al.pd_incident_key = run_pagerduty(mrules, al)
-    al.jira_issue = run_jira(mrules, al)
-    update_active_alerts(al)
-    update_influxdb(al)
+    if al is not None:
+        al.pd_incident_key = get_pagerduty_incident_key(al)
+        al.jira_issue = get_jira_issue(al)
+        mrules = load_mrules()
+        run_slack(mrules, al)
+        al.pd_incident_key = run_pagerduty(mrules, al)
+        al.jira_issue = run_jira(mrules, al)
+        update_active_alerts(al)
+        update_influxdb(al)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
 
@@ -149,10 +154,44 @@ def run_jira(mrules, al):
 
 
 def create_alert(content):
+    global INSTANCES  # Haven't found a good way to avoid this
     LOGGER.debug("Creating alert")
     tags = []
     for s in content['data']['series']:
-        tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
+        try:
+            tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
+        except KeyError:
+            continue
+    try:
+        # Try to find out if alert is from normal ec2 instance or autoscaling
+        # instance, and then be able to suppress deadman alerts from terminated
+        # autoscaling instances
+        LOGGER.debug("Checking incoming host tag")
+        x = [tag['value'] for tag in tags if tag['key'] == 'host']
+        if not x:
+            raise KeyError
+        else:
+            LOGGER.debug("Host tag found, %s", x[0])
+            if not INSTANCES:
+                INSTANCES = update_aws_instance_info()
+            elif INSTANCES['timestamp'] < (time.time() - 60):
+                LOGGER.debug("Instance list has reached it's age limit")
+                info = update_aws_instance_info()
+                # If info is empty, API called failed for some reason.
+                # Best then to keep existing list
+                if info:
+                    INSTANCES = info
+            if x[0] in INSTANCES and INSTANCES[x[0]] in [16, 64, 80]:
+                LOGGER.debug("Instance Name exists and status code is valid, "
+                             "%s - %d", x[0], INSTANCES[x[0]])
+            elif x[0] not in INSTANCES:
+                LOGGER.error("Instance host tag not in instance list")
+            else:
+                LOGGER.debug("Instance status looks like autoscaling instance,"
+                             " supressing alert.")
+                return None
+    except KeyError:
+        LOGGER.debug("Alert is not instance specific or host tag is missing")
 
     al = Alert(
         alertid=content['id'],
@@ -406,3 +445,34 @@ def get_defined_tick_scripts():
     except subprocess.CalledProcessError:
         LOGGER.error("Failed to list defined tick scripts")
     return defined_ticks
+
+
+def get_aws_instances():
+    LOGGER.debug("Collecting instance info from AWS API")
+    try:
+        session = boto3.Session(region_name=app.config['AWS_REGION'])
+        client = session.client('ec2')
+        response = client.describe_instances()
+        instances = []
+        for reserv in response['Reservations']:
+            instances.extend(reserv['Instances'])
+        return instances
+    except (NoRegionError, NoCredentialsError,
+            ProfileNotFound, ClientError) as e:
+        LOGGER.error(e)
+    except KeyError:
+        LOGGER.error("Failed to collect instance info")
+
+
+def update_aws_instance_info():
+    instances = get_aws_instances()
+    if not instances:
+        LOGGER.debug("Got empty instance list from AWS")
+        return None
+    instance_status = {"timestamp": time.time()}
+    LOGGER.debug("Updating instances and status codes")
+    for i in instances:
+        x = [tag['Value'] for tag in i.get('Tags') if tag['Key'] == 'Name']
+        if x:
+            instance_status[x[0]] = i.get('State')['Code']
+    return instance_status

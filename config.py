@@ -13,8 +13,9 @@ class Config(object):
     # Server settings
     SERVER_ADDRESS = "0.0.0.0"
     SERVER_PORT = 9095
-    SECRET_KEY = 'Something-really-clever'
+    SECRET_KEY = "Something-really-clever"
 
+    AWS_REGION = "eu-west-1"
     # Tag used in most or all of kapacitor queries as .groupBy()
     # I use 'Environment' to split between test, staging and produciton
     # host would normally be a sane default if using Telegraf
