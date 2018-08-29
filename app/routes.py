@@ -242,6 +242,8 @@ def update_influxdb(al):
                 delete_active(al)
             else:
                 update_db(influxify(al, "active", True))
+        else:
+            update_db(influxify(al, "active", True))
 
 
 def update_db(data):
@@ -383,6 +385,11 @@ def load_mrules():
 
 def affected_by_mrules(mrules, al):
     LOGGER.debug("Checking maintenance")
+    # If this is an alert OK with an existing ticket, override maintenace
+    if ((al.previouslevel != 'OK' and al.level == 'OK') and
+            (al.jira_issue is not None or al.pd_incident_key is not None)):
+        LOGGER.info("Running maintenance override to clear existing ticket")
+        return False
     for mrule in mrules:
         mrv = mrule['value']
         v = [tag['value'] for tag in al.tags if tag['key'] == mrule['key']]
