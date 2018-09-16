@@ -389,24 +389,24 @@ def affected_by_mrules(mrules, al):
     if ((al.previouslevel != 'OK' and al.level == 'OK') and
             (al.jira_issue is not None or al.pd_incident_key is not None)):
         LOGGER.info("Running maintenance override to clear existing ticket")
-        return False
-    for mrule in mrules:
-        mrv = mrule['value']
-        v = [tag['value'] for tag in al.tags if tag['key'] == mrule['key']]
-        if mrv in v:
-            LOGGER.info("In maintenance")
-            return True
-        elif mrv[0] == '*' and v[0].endswith(mrv[1:]):
-            LOGGER.info("In maintenance")
-            LOGGER.debug("Affected by rule wildcard *endswith")
-            return True
-        elif mrv[-1] == '*' and v[0].startswith(mrv[:-1]):
-            LOGGER.info("In maintenance")
-            LOGGER.debug("Affected by rule wildcard startswith*")
-            return True
-        if mrule['key'] == 'id':
-            if al.id.endswith(mrule['value']):
+    else:
+        for mrule in mrules:
+            mrv = mrule['value']
+            v = [tag['value'] for tag in al.tags if tag['key'] == mrule['key']]
+            if mrv in v:
+                LOGGER.info("In maintenance")
                 return True
+            elif mrv[0] == '*' and v[0].endswith(mrv[1:]):
+                LOGGER.info("In maintenance")
+                LOGGER.debug("Affected by rule wildcard *endswith")
+                return True
+            elif mrv[-1] == '*' and v[0].startswith(mrv[:-1]):
+                LOGGER.info("In maintenance")
+                LOGGER.debug("Affected by rule wildcard startswith*")
+                return True
+            if mrule['key'] == 'id':
+                if al.id.endswith(mrule['value']):
+                    return True
     return False
 
 

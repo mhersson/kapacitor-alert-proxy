@@ -17,7 +17,7 @@ INSTALLDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 LOGGER = logging.getLogger(name="KAP")
 _file_handler = logging.handlers.RotatingFileHandler(
     os.path.join(INSTALLDIR, "logs", "kapacitoralertproxy.log"),
-    'a', 2000000, 5)
+    'a', 5000000, 5)
 _formatter = logging.Formatter("%(asctime)s - %(module)s.%(funcName)s:"
                                "%(lineno)d:%(levelname)s - %(message)s")
 _file_handler.setFormatter(_formatter)
