@@ -78,7 +78,11 @@ def maintenance():
     af = ActivateForm()
     df = DeactivateForm()
     if af.validate_on_submit():
-        activate_maintenance(af.key.data, af.val.data, af.duration.data)
+        if af.days.data and af.starttime.data != "":
+            print("Scheduled", af.key.data, af.val.data, af.duration.data,
+                  af.days.data, af.starttime.data, af.repeat.data)
+        else:
+            activate_maintenance(af.key.data, af.val.data, af.duration.data)
         return redirect('/kap/maintenance')
     if df.validate_on_submit():
         deactive_maintenance(df.start.data, df.stop.data)
