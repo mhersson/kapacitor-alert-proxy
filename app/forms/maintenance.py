@@ -39,3 +39,8 @@ class DeactivateForm(FlaskForm):
     start = HiddenField(validators=[DataRequired()])
     stop = HiddenField(validators=[DataRequired()])
     submit = SubmitField('Deactivate')
+
+
+class DeleteSchedule(FlaskForm):
+    filename = HiddenField(validators=[DataRequired()])
+    submit = SubmitField('Delete')
