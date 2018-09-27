@@ -154,7 +154,6 @@ def run_jira(mrules, al):
 
 
 def create_alert(content):
-    global INSTANCES  # Haven't found a good way to avoid this
     LOGGER.debug("Creating alert")
     tags = []
     for s in content['data']['series']:
@@ -162,36 +161,10 @@ def create_alert(content):
             tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
         except KeyError:
             continue
-    try:
-        # Try to find out if alert is from normal ec2 instance or autoscaling
-        # instance, and then be able to suppress deadman alerts from terminated
-        # autoscaling instances
-        LOGGER.debug("Checking incoming host tag")
-        x = [tag['value'] for tag in tags if tag['key'] == 'host']
-        if not x:
-            raise KeyError
-        else:
-            LOGGER.debug("Host tag found, %s", x[0])
-            if not INSTANCES:
-                INSTANCES = update_aws_instance_info()
-            elif INSTANCES['timestamp'] < (time.time() - 60):
-                LOGGER.debug("Instance list has reached it's age limit")
-                info = update_aws_instance_info()
-                # If info is empty, API called failed for some reason.
-                # Best then to keep existing list
-                if info:
-                    INSTANCES = info
-            if x[0] in INSTANCES and INSTANCES[x[0]] in [16, 64, 80]:
-                LOGGER.debug("Instance Name exists and status code is valid, "
-                             "%s - %d", x[0], INSTANCES[x[0]])
-            elif x[0] not in INSTANCES:
-                LOGGER.error("Instance host tag not in instance list")
-            else:
-                LOGGER.debug("Instance status looks like autoscaling instance,"
-                             " supressing alert.")
-                return None
-    except KeyError:
-        LOGGER.debug("Alert is not instance specific or host tag is missing")
+
+    if app.config['AWS_API_ENABLED']:
+        if suppress_alert(tags):
+            return None
 
     al = Alert(
         alertid=content['id'],
@@ -203,6 +176,38 @@ def create_alert(content):
         tags=tags)
     LOGGER.debug(al)
     return al
+
+
+def suppress_alert(instance_tags):
+    # Try to find out if alert is from a normal ec2 instance or autoscaling
+    # instance, and then suppress alerts from terminated autoscaling instances
+    instance_info = update_aws_instance_info()
+    try:
+        LOGGER.debug("Checking incoming host tag")
+        x = [tag['value'] for tag in instance_tags if tag['key'] == 'host']
+        if not x:
+            raise KeyError
+        else:
+            LOGGER.debug("Host tag found, %s", x[0])
+            if instance_info:
+                if (x[0] in instance_info and
+                        instance_info[x[0]] in [16, 64, 80]):
+                    LOGGER.debug("Instance Name exists and status code is "
+                                 "valid, %s - %d", x[0], instance_info[x[0]])
+                elif x[0] not in instance_info:
+                    LOGGER.error("Instance host tag not in instance list, "
+                                 "suppressing alert")
+                    return True
+                else:
+                    LOGGER.debug("Instance status looks like autoscaling"
+                                 " instance, supressing alert")
+                    return True
+    except KeyError:
+        LOGGER.debug("Alert is not instance specific or host tag is missing")
+    finally:
+        # To limit the number of API queries, chech for stale alerts here
+        remove_stale_alerts(instance_info)
+    return False
 
 
 def datestr_to_datetime(datestr):
@@ -260,6 +265,31 @@ def delete_active(al):
         db.delete_series(measurement="active", tags={"hash": get_hash(al)})
     except InfluxDBClientError as err:
         LOGGER.error("Error(%s) - %s", err.code, err.content)
+
+
+def remove_stale_alerts(aws_instances):
+    LOGGER.debug("Checking for stale alerts from terminated instances")
+    # Remove old stale alerts from terminated instances
+    for alhash, al in ACTIVE_ALERTS:
+        x = [tag['value'] for tag in al.tags if tag['key'] == 'host']
+        if not x:
+            # Alert does not have host tag set, nothing to do
+            continue
+        else:
+            if not (x[0] in aws_instances and
+                    aws_instances[x[0]] in [16, 64, 80]):
+                LOGGER.debug(
+                    "Stale alert found, host not in aws instance list")
+                LOGGER.debug("Removing stale alert")
+                del ACTIVE_ALERTS[alhash]
+                if app.config['INFLUXDB_ENABLED'] is True:
+                    delete_active(al=al)
+                LOGGER.debug("Cleaning up existing Pagerduty or JIRA tickets")
+                al.level = "OK"
+                if al.pd_incident_key:
+                    pagerduty.post(alert=al)
+                if al.jira_issue:
+                    jira.post(alert=al)
 
 
 def influxify(al, measurement, zero_time=False):
@@ -474,9 +504,9 @@ def get_aws_instances():
 def update_aws_instance_info():
     instances = get_aws_instances()
     if not instances:
-        LOGGER.debug("Got empty instance list from AWS")
+        LOGGER.error("Got empty instance list from AWS")
         return None
-    instance_status = {"timestamp": time.time()}
+    instance_status = {}
     LOGGER.debug("Updating instances and status codes")
     for i in instances:
         x = [tag['Value'] for tag in i.get('Tags') if tag['Key'] == 'Name']

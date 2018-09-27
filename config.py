@@ -15,7 +15,13 @@ class Config(object):
     SERVER_PORT = 9095
     SECRET_KEY = "Something-really-clever"
 
+    # This is used to gather instance info, suppress alerts from
+    # terminated auto-scaling instances, and remove stale alerts from
+    # all types of terminated instances - AWS API Gateway prices apply
+    # https://aws.amazon.com/api-gateway/pricing/
+    AWS_API_ENABLED = True
     AWS_REGION = "eu-west-1"
+
     # Tag used in most or all of kapacitor queries as .groupBy()
     # I use 'Environment' to split between test, staging and produciton
     # host would normally be a sane default if using Telegraf
