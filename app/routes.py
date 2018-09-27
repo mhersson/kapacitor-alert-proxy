@@ -270,7 +270,7 @@ def delete_active(al):
 def remove_stale_alerts(aws_instances):
     LOGGER.debug("Checking for stale alerts from terminated instances")
     # Remove old stale alerts from terminated instances
-    for alhash, al in ACTIVE_ALERTS:
+    for alhash, al in ACTIVE_ALERTS.items():
         x = [tag['value'] for tag in al.tags if tag['key'] == 'host']
         if not x:
             # Alert does not have host tag set, nothing to do
