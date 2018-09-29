@@ -24,6 +24,8 @@
                 <td style="text-align: center">
                     <form action="" method="POST">
                         {{ df.csrf_token }}
+                        {{ df.key(value=rule.key) }}
+                        {{ df.value(value=rule.value) }}
                         {{ df.start(value=rule.start) }}
                         {{ df.stop(value=rule.stop) }}
                         {{ df.submit(class="btn btn-sm btn-danger") }}

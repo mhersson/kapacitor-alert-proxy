@@ -1,4 +1,5 @@
 # vim:set shiftwidth=4 softtabstop=4 expandtab:
+# pylint: disable=R0903
 '''
 Module: forms.maintenance.py
 
@@ -22,7 +23,7 @@ class ActivateForm(FlaskForm):
     key = SelectField(choices=app.config['MAINTENANCE_TAGS'])
     val = StringField(validators=[DataRequired()])
     duration = StringField(validators=[DataRequired(),
-                                       Regexp("[1-9][0-9]*[m|h|d]")])
+                                       Regexp("[1-9][0-9]*[m|h|d|w]")])
     days = MultiCheckboxField(validators=[Optional()],
                               choices=[("0", "Mon"), ("1", "Tue"),
                                        ("2", "Wed"), ("3", "Thu"),
@@ -36,6 +37,8 @@ class ActivateForm(FlaskForm):
 
 
 class DeactivateForm(FlaskForm):
+    key = HiddenField(validators=[DataRequired()])
+    value = HiddenField(validators=[DataRequired()])
     start = HiddenField(validators=[DataRequired()])
     stop = HiddenField(validators=[DataRequired()])
     submit = SubmitField('Deactivate')

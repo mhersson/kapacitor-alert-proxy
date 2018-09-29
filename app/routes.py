@@ -87,7 +87,8 @@ def maintenance():
             activate_maintenance(af.key.data, af.val.data, af.duration.data)
         return redirect('/kap/maintenance')
     if df.validate_on_submit():
-        deactive_maintenance(df.start.data, df.stop.data)
+        deactive_maintenance(df.key.data, df.value.data,
+                             df.start.data, df.stop.data)
         return redirect('/kap/maintenance')
     if dsf.validate_on_submit():
         delete_schedule(dsf.filename.data)
@@ -165,7 +166,6 @@ def run_jira(mrules, al):
 
 
 def create_alert(content):
-    global INSTANCES  # Haven't found a good way to avoid this
     LOGGER.debug("Creating alert")
     tags = []
     for s in content['data']['series']:
@@ -173,36 +173,10 @@ def create_alert(content):
             tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
         except KeyError:
             continue
-    try:
-        # Try to find out if alert is from normal ec2 instance or autoscaling
-        # instance, and then be able to suppress deadman alerts from terminated
-        # autoscaling instances
-        LOGGER.debug("Checking incoming host tag")
-        x = [tag['value'] for tag in tags if tag['key'] == 'host']
-        if not x:
-            raise KeyError
-        else:
-            LOGGER.debug("Host tag found, %s", x[0])
-            if not INSTANCES:
-                INSTANCES = update_aws_instance_info()
-            elif INSTANCES['timestamp'] < (time.time() - 60):
-                LOGGER.debug("Instance list has reached it's age limit")
-                info = update_aws_instance_info()
-                # If info is empty, API called failed for some reason.
-                # Best then to keep existing list
-                if info:
-                    INSTANCES = info
-            if x[0] in INSTANCES and INSTANCES[x[0]] in [16, 64, 80]:
-                LOGGER.debug("Instance Name exists and status code is valid, "
-                             "%s - %d", x[0], INSTANCES[x[0]])
-            elif x[0] not in INSTANCES:
-                LOGGER.error("Instance host tag not in instance list")
-            else:
-                LOGGER.debug("Instance status looks like autoscaling instance,"
-                             " supressing alert.")
-                return None
-    except KeyError:
-        LOGGER.debug("Alert is not instance specific or host tag is missing")
+
+    if app.config['AWS_API_ENABLED']:
+        if suppress_alert(tags):
+            return None
 
     al = Alert(
         alertid=content['id'],
@@ -214,6 +188,38 @@ def create_alert(content):
         tags=tags)
     LOGGER.debug(al)
     return al
+
+
+def suppress_alert(instance_tags):
+    # Try to find out if alert is from a normal ec2 instance or autoscaling
+    # instance, and then suppress alerts from terminated autoscaling instances
+    instance_info = update_aws_instance_info()
+    try:
+        LOGGER.debug("Checking incoming host tag")
+        x = [tag['value'] for tag in instance_tags if tag['key'] == 'host']
+        if not x:
+            raise KeyError
+        else:
+            LOGGER.debug("Host tag found, %s", x[0])
+            if instance_info:
+                if (x[0] in instance_info and
+                        instance_info[x[0]] in [16, 64, 80]):
+                    LOGGER.debug("Instance Name exists and status code is "
+                                 "valid, %s - %d", x[0], instance_info[x[0]])
+                elif x[0] not in instance_info:
+                    LOGGER.error("Instance host tag not in instance list, "
+                                 "suppressing alert")
+                    return True
+                else:
+                    LOGGER.debug("Instance status looks like autoscaling"
+                                 " instance, supressing alert")
+                    return True
+    except KeyError:
+        LOGGER.debug("Alert is not instance specific or host tag is missing")
+    finally:
+        # To limit the number of API queries, chech for stale alerts here
+        remove_stale_alerts(instance_info)
+    return False
 
 
 def datestr_to_datetime(datestr):
@@ -271,6 +277,31 @@ def delete_active(al):
         db.delete_series(measurement="active", tags={"hash": get_hash(al)})
     except InfluxDBClientError as err:
         LOGGER.error("Error(%s) - %s", err.code, err.content)
+
+
+def remove_stale_alerts(aws_instances):
+    LOGGER.debug("Checking for stale alerts from terminated instances")
+    # Remove old stale alerts from terminated instances
+    for alhash, al in ACTIVE_ALERTS.items():
+        x = [tag['value'] for tag in al.tags if tag['key'] == 'host']
+        if not x:
+            # Alert does not have host tag set, nothing to do
+            continue
+        else:
+            if not (x[0] in aws_instances and
+                    aws_instances[x[0]] in [16, 64, 80]):
+                LOGGER.debug(
+                    "Stale alert found, host not in aws instance list")
+                LOGGER.debug("Removing stale alert")
+                del ACTIVE_ALERTS[alhash]
+                if app.config['INFLUXDB_ENABLED'] is True:
+                    delete_active(al=al)
+                LOGGER.debug("Cleaning up existing Pagerduty or JIRA tickets")
+                al.level = "OK"
+                if al.pd_incident_key:
+                    pagerduty.post(alert=al)
+                if al.jira_issue:
+                    jira.post(alert=al)
 
 
 def influxify(al, measurement, zero_time=False):
@@ -356,38 +387,49 @@ def get_jira_issue(al):
 
 def activate_maintenance(key, val, duration):
     LOGGER.debug('Setting maintenance')
-    duration_secs = {'m': 60, 'h': 3600, 'd': 86400}
+    duration_secs = {'m': 60, 'h': 3600, 'd': 86400, 'w': 604800}
     start = int(time.time())
     stop = int(start + (int(duration[:-1]) * duration_secs[duration[-1]]))
     rule = {"key": key, "value": val, "start": start, "stop": stop}
     filename = "maintenance_{}-{}.json".format(start, stop)
-    try:
-        with open(os.path.join(INSTALLDIR, "maintenance", filename), 'w') as f:
-            f.write(json.dumps(rule) + "\n")
-    except OSError:
-        LOGGER.error("Failed to activate maintenance")
+    path = os.path.join(INSTALLDIR, "maintenance", filename)
+    rules = []
+    # If multiple schedules start and stop at the exact same time
+    # they will try to write to the same file, so reload file
+    # into a list of rules and append the the latest rule
+    if os.path.exists(path):
+        rules = load_json(path)
+    rules.append(rule)
+    write_json(path, rules)
 
 
-def deactive_maintenance(start, stop):
+def deactive_maintenance(key, value, start, stop):
     LOGGER.debug("Deactive maintenance")
+    rule = {"key": key, "value": value, "start": int(start), "stop": int(stop)}
     filename = "maintenance_{}-{}.json".format(start, stop)
-    try:
-        os.remove(os.path.join(INSTALLDIR, "maintenance", filename))
-    except OSError:
-        LOGGER.error("Failed to deactivate maintenance")
+    path = os.path.join(INSTALLDIR, "maintenance", filename)
+    rules = load_json(path)
+    if len(rules) == 1:
+        os.remove(path)
+    else:
+        LOGGER.debug("Found multiple rules in maintenance file")
+        for index, r in enumerate(rules):
+            if r == rule:
+                LOGGER.debug("Deleting rule %s", str(r))
+                del rules[index]
+                break
+        write_json(path, rules)
 
 
 def schedule_maintenance(key, val, duration, days, starttime, repeat):
     r = True if repeat else False
     filename = "schedule_{}.json".format(int(time.time()))
+    counter = {day: 0 for day in days}
     schedule = {"key": key, "value": val, "duration": duration, "days": days,
-                "starttime": starttime, "repeat": r, "filename": filename}
-    try:
-        with open(os.path.join(
-                INSTALLDIR, "maintenance/schedule", filename), 'w') as f:
-            f.write(json.dumps(schedule) + "\n")
-    except OSError:
-        LOGGER.error("Failed to write schedule")
+                "starttime": starttime, "repeat": r,
+                "runcounter": counter, "filename": filename}
+    write_json(os.path.join(
+        INSTALLDIR, "maintenance/schedule", filename), schedule)
 
 
 def load_schedule():
@@ -398,8 +440,7 @@ def load_schedule():
     for msf in msfiles:
         m = re.match("schedule_([0-9]{10}).json", msf)
         if m:
-            with open(os.path.join(msdir, msf), 'r') as f:
-                schedule.append(json.loads(f.read()))
+            schedule.append(load_json(os.path.join(msdir, msf)))
     return schedule
 
 
@@ -420,8 +461,7 @@ def load_mrules():
         m = re.match("maintenance_([0-9]{10})-([0-9]{10}).json", mf)
         if m:
             if int(m.group(1)) <= int(time.time()) <= int(m.group(2)):
-                with open(os.path.join(mdir, mf), 'r') as f:
-                    mrules.append(json.loads(f.read()))
+                mrules.extend(load_json(os.path.join(mdir, mf)))
             else:
                 LOGGER.info("Deleting expired rule")
                 os.remove(os.path.join(mdir, mf))
@@ -521,12 +561,28 @@ def get_aws_instances():
 def update_aws_instance_info():
     instances = get_aws_instances()
     if not instances:
-        LOGGER.debug("Got empty instance list from AWS")
+        LOGGER.error("Got empty instance list from AWS")
         return None
-    instance_status = {"timestamp": time.time()}
+    instance_status = {}
     LOGGER.debug("Updating instances and status codes")
     for i in instances:
         x = [tag['Value'] for tag in i.get('Tags') if tag['Key'] == 'Name']
         if x:
             instance_status[x[0]] = i.get('State')['Code']
     return instance_status
+
+
+def write_json(path, content):
+    try:
+        with open(path, 'w') as f:
+            f.write(json.dumps(content) + "\n")
+    except OSError:
+        LOGGER.error("Failed writing %s", path)
+
+
+def load_json(path):
+    try:
+        with open(path, 'r') as f:
+            return json.loads(f.read())
+    except OSError:
+        LOGGER.error("Failed reading %s", path)
