@@ -7,10 +7,15 @@ Created: 27.Mar.2018
 Created by: Morten Hersson, <mhersson@gmail.com>
 '''
 from app import app
+from app.tasks import MaintenanceScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 
 
 if __name__ == '__main__':
-    app.jinja_env.auto_reload = True
-    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    task = MaintenanceScheduler()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(task.run, 'interval', seconds=60)
+    scheduler.start()
     app.run(host=app.config['SERVER_ADDRESS'], port=app.config['SERVER_PORT'],
             debug=False, threaded=True)
+    scheduler.shutdown()

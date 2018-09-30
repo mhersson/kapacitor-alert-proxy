@@ -25,7 +25,7 @@ from app.alert import Alert
 from app.targets.slack import Slack
 from app.targets.pagerduty import Pagerduty
 from app.targets.jira import Incident
-from app.forms.maintenance import ActivateForm, DeactivateForm
+from app.forms.maintenance import ActivateForm, DeactivateForm, DeleteSchedule
 
 STARTUP_TIME = time.time()
 
@@ -77,15 +77,27 @@ def alert():
 def maintenance():
     af = ActivateForm()
     df = DeactivateForm()
+    dsf = DeleteSchedule()
     if af.validate_on_submit():
-        activate_maintenance(af.key.data, af.val.data, af.duration.data)
+        if af.days.data and af.starttime.data != "":
+            schedule_maintenance(af.key.data, af.val.data, af.duration.data,
+                                 af.days.data, af.starttime.data,
+                                 af.repeat.data)
+        else:
+            activate_maintenance(af.key.data, af.val.data, af.duration.data)
         return redirect('/kap/maintenance')
     if df.validate_on_submit():
-        deactive_maintenance(df.start.data, df.stop.data)
+        deactive_maintenance(df.key.data, df.value.data,
+                             df.start.data, df.stop.data)
+        return redirect('/kap/maintenance')
+    if dsf.validate_on_submit():
+        delete_schedule(dsf.filename.data)
         return redirect('/kap/maintenance')
     mrules = load_mrules()
+    schedule = load_schedule()
     return render_template('maintenance.html', title="Maintenance",
-                           mrules=mrules, af=af, df=df)
+                           mrules=mrules, schedule=schedule,
+                           af=af, df=df, dsf=dsf)
 
 
 @app.route("/kap/status", methods=['GET'])
@@ -375,25 +387,69 @@ def get_jira_issue(al):
 
 def activate_maintenance(key, val, duration):
     LOGGER.debug('Setting maintenance')
-    duration_secs = {'m': 60, 'h': 3600, 'd': 86400}
+    duration_secs = {'m': 60, 'h': 3600, 'd': 86400, 'w': 604800}
     start = int(time.time())
     stop = int(start + (int(duration[:-1]) * duration_secs[duration[-1]]))
     rule = {"key": key, "value": val, "start": start, "stop": stop}
     filename = "maintenance_{}-{}.json".format(start, stop)
-    try:
-        with open(os.path.join(INSTALLDIR, "maintenance", filename), 'w') as f:
-            f.write(json.dumps(rule))
-    except OSError:
-        LOGGER.error("Failed to activate maintenance")
+    path = os.path.join(INSTALLDIR, "maintenance", filename)
+    rules = []
+    # If multiple schedules start and stop at the exact same time
+    # they will try to write to the same file, so reload file
+    # into a list of rules and append the the latest rule
+    if os.path.exists(path):
+        rules = load_json(path)
+    rules.append(rule)
+    write_json(path, rules)
 
 
-def deactive_maintenance(start, stop):
+def deactive_maintenance(key, value, start, stop):
     LOGGER.debug("Deactive maintenance")
+    rule = {"key": key, "value": value, "start": int(start), "stop": int(stop)}
     filename = "maintenance_{}-{}.json".format(start, stop)
+    path = os.path.join(INSTALLDIR, "maintenance", filename)
+    rules = load_json(path)
+    if len(rules) == 1:
+        os.remove(path)
+    else:
+        LOGGER.debug("Found multiple rules in maintenance file")
+        for index, r in enumerate(rules):
+            if r == rule:
+                LOGGER.debug("Deleting rule %s", str(r))
+                del rules[index]
+                break
+        write_json(path, rules)
+
+
+def schedule_maintenance(key, val, duration, days, starttime, repeat):
+    r = True if repeat else False
+    filename = "schedule_{}.json".format(int(time.time()))
+    counter = {day: 0 for day in days}
+    schedule = {"key": key, "value": val, "duration": duration, "days": days,
+                "starttime": starttime, "repeat": r,
+                "runcounter": counter, "filename": filename}
+    write_json(os.path.join(
+        INSTALLDIR, "maintenance/schedule", filename), schedule)
+
+
+def load_schedule():
+    LOGGER.debug("Loading schedule")
+    schedule = []
+    msdir = os.path.join(INSTALLDIR, "maintenance/schedule")
+    msfiles = os.listdir(msdir)
+    for msf in msfiles:
+        m = re.match("schedule_([0-9]{10}).json", msf)
+        if m:
+            schedule.append(load_json(os.path.join(msdir, msf)))
+    return schedule
+
+
+def delete_schedule(filename):
+    LOGGER.debug("Delete schedule")
     try:
-        os.remove(os.path.join(INSTALLDIR, "maintenance", filename))
+        os.remove(os.path.join(INSTALLDIR, "maintenance/schedule", filename))
     except OSError:
-        LOGGER.error("Failed to deactivate maintenance")
+        LOGGER.error("Failed to delete schedule")
 
 
 def load_mrules():
@@ -405,8 +461,7 @@ def load_mrules():
         m = re.match("maintenance_([0-9]{10})-([0-9]{10}).json", mf)
         if m:
             if int(m.group(1)) <= int(time.time()) <= int(m.group(2)):
-                with open(os.path.join(mdir, mf), 'r') as f:
-                    mrules.append(json.loads(f.read()))
+                mrules.extend(load_json(os.path.join(mdir, mf)))
             else:
                 LOGGER.info("Deleting expired rule")
                 os.remove(os.path.join(mdir, mf))
@@ -481,6 +536,8 @@ def get_defined_tick_scripts():
             defined_ticks.append(t.split())
     except subprocess.CalledProcessError:
         LOGGER.error("Failed to list defined tick scripts")
+    except FileNotFoundError:
+        LOGGER.error("Kapacitor is not installed")
     return defined_ticks
 
 
@@ -513,3 +570,19 @@ def update_aws_instance_info():
         if x:
             instance_status[x[0]] = i.get('State')['Code']
     return instance_status
+
+
+def write_json(path, content):
+    try:
+        with open(path, 'w') as f:
+            f.write(json.dumps(content) + "\n")
+    except OSError:
+        LOGGER.error("Failed writing %s", path)
+
+
+def load_json(path):
+    try:
+        with open(path, 'r') as f:
+            return json.loads(f.read())
+    except OSError:
+        LOGGER.error("Failed reading %s", path)

@@ -1,0 +1,62 @@
+<style type="text/css">
+#days li, #repeat li {
+    display: inline-block;
+}
+#days li label, #repeat li label {
+    margin-right: 5px;
+    margin-left: 10px;
+}
+#days.custom-select, #repeat.custom-select{
+    background: none !important;
+    border: 0px;
+}
+</style>
+
+<div class="jumbotron" style="margin-top: 30px">
+     <div class="text-center" style="margin-bottom: 20px; margin-top: -40px">
+         <h3>Activate or Schedule Maintenance</h3>
+     </div>
+    <form id="main-form" class="form" action="" method="POST">
+        {{ af.csrf_token }}
+        <div class="row">
+            <div class="col-md-auto">
+                {{ af.key(class='custom-select') }}
+            </div>
+            <div class="col-md-auto">
+                {{ af.val(size='60', class='form-control', placeholder='Value') }}
+                {% for error in af.val.errors %}
+                <span style="color: red"><small>{{ error }}</small></span>
+                {% endfor %}
+            </div>
+            <div class="col">
+                {{ af.duration(size='8', class='form-control', placeholder='Duration') }}
+                {% for error in af.duration.errors %}
+                <span style="color: red"><small>{{ error }}</small></span>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="row" style="margin-top: 20px;margin-bottom: -20px">
+            <div class="card bg-info" style="margin-left: 15px">
+                <div class="card-body">
+                    <div class="row" style="margin-top: -10px;margin-bottom: -30px">
+                        <div class="col-md-auto" style="margin-left: -30px">
+                            {{ af.days(class='custom-select') }}
+                        </div>
+                        <div class="col-md-auto">
+                            {{ af.starttime(size='15', class='form-control', placeholder='Start time (hh:mm)') }}
+                            {% for error in af.starttime.errors %}
+                            <span style="color: red"><small>{{ error }}</small></span>
+                            {% endfor %}
+                        </div>
+                        <div class="col" style="margin-right: -30px">
+                            {{ af.repeat(class='custom-select') }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-auto" style="margin-top: 8px;margin-left: 27px">
+                {{ af.submit(class='btn btn-outline-success btn-lg') }}
+            </div>
+        </div>
+    </form>
+</div>
