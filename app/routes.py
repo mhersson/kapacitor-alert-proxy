@@ -64,9 +64,10 @@ def alert():
         al.pd_incident_key = get_pagerduty_incident_key(al)
         al.jira_issue = get_jira_issue(al)
         mrules = load_mrules()
-        run_slack(mrules, al)
-        al.pd_incident_key = run_pagerduty(mrules, al)
-        al.jira_issue = run_jira(mrules, al)
+        in_maintenance = affected_by_mrules(mrules, al)
+        run_slack(in_maintenance, al)
+        al.pd_incident_key = run_pagerduty(in_maintenance, al)
+        al.jira_issue = run_jira(in_maintenance, al)
         update_active_alerts(al)
         update_influxdb(al)
     return Response(response={'Success': True},
@@ -135,16 +136,16 @@ def format_secs(s):
     return str(timedelta(seconds=s)).split(".")[0]
 
 
-def run_slack(mrules, al):
+def run_slack(in_maintenance, al):
     if app.config['SLACK_ENABLED'] and (
-            not affected_by_mrules(mrules, al) or
+            not in_maintenance or
             app.config['SLACK_IGNORE_MAINTENANCE']):
         slack.post(al)
 
 
-def run_pagerduty(mrules, al):
+def run_pagerduty(in_maintenance, al):
     if app.config['PAGERDUTY_ENABLED'] and (
-            not affected_by_mrules(mrules, al) or
+            not in_maintenance or
             app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
         if contains_excluded_tags(
                 app.config['PAGERDUTY_EXCLUDED_TAGS'], al.tags):
@@ -156,8 +157,8 @@ def run_pagerduty(mrules, al):
     return al.pd_incident_key
 
 
-def run_jira(mrules, al):
-    if app.config['JIRA_ENABLED'] and not affected_by_mrules(mrules, al):
+def run_jira(in_maintenance, al):
+    if app.config['JIRA_ENABLED'] and not in_maintenance:
         if contains_excluded_tags(app.config['JIRA_EXCLUDED_TAGS'], al.tags):
             return al.jira_issue
         al.jira_issue = jira.post(al)
@@ -174,19 +175,17 @@ def create_alert(content):
         except KeyError:
             continue
 
+    al = Alert(alertid=content['id'],
+               duration=content['duration'] // (10 ** 9),
+               message=content['message'], level=content['level'],
+               previouslevel=content['previousLevel'],
+               alerttime=datestr_to_datetime(datestr=content['time']),
+               tags=tags)
+    LOGGER.debug(al)
+
     if app.config['AWS_API_ENABLED']:
         if suppress_alert(tags):
             return None
-
-    al = Alert(
-        alertid=content['id'],
-        duration=content['duration'] // (10 ** 9),
-        message=content['message'],
-        level=content['level'],
-        previouslevel=content['previousLevel'],
-        alerttime=datestr_to_datetime(datestr=content['time']),
-        tags=tags)
-    LOGGER.debug(al)
     return al
 
 
@@ -479,15 +478,10 @@ def affected_by_mrules(mrules, al):
             mrv = mrule['value']
             v = [tag['value'] for tag in al.tags if tag['key'] == mrule['key']]
             if mrv in v:
-                LOGGER.info("In maintenance")
                 return True
-            elif mrv[0] == '*' and v[0].endswith(mrv[1:]):
-                LOGGER.info("In maintenance")
-                LOGGER.debug("Affected by rule wildcard *endswith")
+            if mrv[0] == '*' and v[0].endswith(mrv[1:]):
                 return True
-            elif mrv[-1] == '*' and v[0].startswith(mrv[:-1]):
-                LOGGER.info("In maintenance")
-                LOGGER.debug("Affected by rule wildcard startswith*")
+            if mrv[-1] == '*' and v[0].startswith(mrv[:-1]):
                 return True
             if mrule['key'] == 'id':
                 if al.id.endswith(mrule['value']):

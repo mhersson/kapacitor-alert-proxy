@@ -28,16 +28,15 @@ class MaintenanceScheduler():
             if m:
                 filename = os.path.join(self._scheduledir, sf)
                 schedule = self._read_file(filename)
-                LOGGER.debug("Schedule: %s", str(schedule))
                 if (self._check_day(now, schedule['days'])
                         and self._check_starttime(now, schedule['starttime'])):
                     LOGGER.debug("Activating scheduled maintenance")
+                    LOGGER.debug("Schedule: %s", str(schedule))
                     app.routes.activate_maintenance(schedule['key'],
                                                     schedule['value'],
                                                     schedule['duration'])
                     schedule['runcounter'] = self._update_run_counter(
                         now, schedule['runcounter'])
-                    LOGGER.debug("RUNCOUNTER: %s", str(schedule['runcounter']))
                     self._write_file(filename, schedule)
                     if (self._schedule_completed(schedule['runcounter'])
                             and not schedule['repeat']):
