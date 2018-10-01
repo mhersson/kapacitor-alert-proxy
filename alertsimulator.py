@@ -7,6 +7,7 @@ json_body = {"id": "test.host test",
              "level": "CRITICAL",
              "previousLevel": "OK",
              "time": time.strftime("2018-05-31T12:04:30"),
-             "data": {"series": [{"tags": {'Environment': 'test'}}]}}
+             "data": {"series": [{"tags": {'Environment': 'test',
+                                  "host": 'collector.test.borsen.cue.cloud'}}]}}
 
 requests.post(url="http://localhost:9095/kap/alert", json=json_body)

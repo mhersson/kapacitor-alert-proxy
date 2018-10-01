@@ -13,6 +13,7 @@ import time
 import boto3
 import hashlib
 import subprocess
+import requests
 from datetime import datetime, timedelta
 from flask import Response, request, render_template, redirect
 from influxdb import InfluxDBClient
@@ -20,7 +21,7 @@ from influxdb.exceptions import InfluxDBClientError
 from botocore.exceptions import NoCredentialsError, ProfileNotFound
 from botocore.exceptions import NoRegionError, ClientError
 
-from app import app, LOGGER, INSTALLDIR
+from app import app, LOGGER, INSTALLDIR, TZNAME
 from app.alert import Alert
 from app.targets.slack import Slack
 from app.targets.pagerduty import Pagerduty
@@ -61,15 +62,17 @@ def alert():
     LOGGER.debug("Received new data")
     al = create_alert(request.json)
     if al is not None:
-        al.pd_incident_key = get_pagerduty_incident_key(al)
-        al.jira_issue = get_jira_issue(al)
+        alhash = get_hash(al)
+        al.pd_incident_key = get_pagerduty_incident_key(alhash)
+        al.jira_issue = get_jira_issue(alhash)
+        al.grafana_url = add_grafana_url(al)
         mrules = load_mrules()
         in_maintenance = affected_by_mrules(mrules, al)
         run_slack(in_maintenance, al)
         al.pd_incident_key = run_pagerduty(in_maintenance, al)
         al.jira_issue = run_jira(in_maintenance, al)
-        update_active_alerts(al)
-        update_influxdb(al)
+        update_active_alerts(al, alhash)
+        update_influxdb(al, alhash)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
 
@@ -98,7 +101,7 @@ def maintenance():
     schedule = load_schedule()
     return render_template('maintenance.html', title="Maintenance",
                            mrules=mrules, schedule=schedule,
-                           af=af, df=df, dsf=dsf)
+                           af=af, df=df, dsf=dsf, tzname=TZNAME)
 
 
 @app.route("/kap/status", methods=['GET'])
@@ -110,7 +113,8 @@ def status():
             aim.append(ACTIVE_ALERTS[a])
     return render_template('status.html', title="Active alerts",
                            group_tag=app.config['MAIN_GROUP_TAG'],
-                           alerts=ACTIVE_ALERTS, maintenance=aim)
+                           alerts=ACTIVE_ALERTS, maintenance=aim,
+                           tzname=TZNAME)
 
 
 @app.route("/kap/statistics", methods=['GET'])
@@ -134,6 +138,82 @@ def timectime(s):
 @app.template_filter('timedelta')
 def format_secs(s):
     return str(timedelta(seconds=s)).split(".")[0]
+
+
+@app.template_filter('truncate')
+def truncate_string(s):
+    if len(s) > 200:
+        return s[:197] + "..."
+    return s
+
+
+def create_alert(content):
+    LOGGER.debug("Creating alert")
+    tags = []
+    for s in content['data']['series']:
+        try:
+            tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
+        except KeyError:
+            continue
+
+    al = Alert(alertid=content['id'],
+               duration=content['duration'] // (10 ** 9),
+               message=content['message'], level=content['level'],
+               previouslevel=content['previousLevel'],
+               alerttime=datestr_to_datetime(datestr=content['time']),
+               tags=tags)
+    LOGGER.debug(al)
+
+    if app.config['AWS_API_ENABLED']:
+        suppress, modified_tags = check_instance_tags(tags)
+        if suppress:
+            return None
+        if modified_tags:
+            al.tags = modified_tags
+    return al
+
+
+def check_instance_tags(instance_tags):
+    # Try to find out if alert is from a normal ec2 instance or autoscaling
+    # instance, and then suppress alerts from terminated autoscaling instances
+    # If instance is valid and running, check that the Environment tag exists,
+    # if not try to add it from aws info (this will be the case for e.g ping
+    # test ran outside of the instance environment)
+    instance_info = update_aws_instance_info()
+    try:
+        LOGGER.debug("Checking incoming host tag")
+        x = [tag['value'] for tag in instance_tags if tag['key'] == 'host']
+        if not x:
+            raise KeyError
+        else:
+            LOGGER.debug("Host tag found, %s", x[0])
+            if instance_info:
+                if (x[0] in instance_info and
+                        instance_info[x[0]]['state'] in [16, 64, 80]):
+                    LOGGER.debug("Instance Name exists and status code is "
+                                 "valid, %s - %d", x[0],
+                                 instance_info[x[0]]['state'])
+                    env = [tag['value'] for tag in instance_tags
+                           if tag['key'] == 'Environment']
+                    if not env:
+                        LOGGER.debug("Adding missing Environment tag")
+                        instance_tags['Environment'] = \
+                            instance_info[x[0]]['state']['env']
+                        return False, instance_tags
+                elif x[0] not in instance_info:
+                    LOGGER.error("Instance host tag not in instance list, "
+                                 "suppressing alert")
+                    return True, None
+                else:
+                    LOGGER.debug("Instance status looks like autoscaling"
+                                 " instance, supressing alert")
+                    return True, None
+    except KeyError:
+        LOGGER.debug("Alert is not instance specific or host tag is missing")
+    finally:
+        # To limit the number of API queries, chech for stale alerts here
+        remove_stale_alerts(instance_info)
+    return False, None
 
 
 def run_slack(in_maintenance, al):
@@ -166,77 +246,29 @@ def run_jira(in_maintenance, al):
     return al.jira_issue
 
 
-def create_alert(content):
-    LOGGER.debug("Creating alert")
-    tags = []
-    for s in content['data']['series']:
-        try:
-            tags.extend([{'key': k, 'value': v} for k, v in s['tags'].items()])
-        except KeyError:
-            continue
-
-    al = Alert(alertid=content['id'],
-               duration=content['duration'] // (10 ** 9),
-               message=content['message'], level=content['level'],
-               previouslevel=content['previousLevel'],
-               alerttime=datestr_to_datetime(datestr=content['time']),
-               tags=tags)
-    LOGGER.debug(al)
-
-    if app.config['AWS_API_ENABLED']:
-        if suppress_alert(tags):
-            return None
-    return al
-
-
-def suppress_alert(instance_tags):
-    # Try to find out if alert is from a normal ec2 instance or autoscaling
-    # instance, and then suppress alerts from terminated autoscaling instances
-    instance_info = update_aws_instance_info()
-    try:
-        LOGGER.debug("Checking incoming host tag")
-        x = [tag['value'] for tag in instance_tags if tag['key'] == 'host']
-        if not x:
-            raise KeyError
+def add_grafana_url(al):
+    if app.config['GRAFANA_ENABLED']:
+        LOGGER.debug("Adding Grafana url")
+        # Show from 2 hours before alert until 2 hours after
+        if al.duration > 14400:
+            starttime = int((time.time() - al.duration - 7200) * 1000)
+            stoptime = int((time.time() - al.duration + 7200) * 1000)
         else:
-            LOGGER.debug("Host tag found, %s", x[0])
-            if instance_info:
-                if (x[0] in instance_info and
-                        instance_info[x[0]] in [16, 64, 80]):
-                    LOGGER.debug("Instance Name exists and status code is "
-                                 "valid, %s - %d", x[0], instance_info[x[0]])
-                elif x[0] not in instance_info:
-                    LOGGER.error("Instance host tag not in instance list, "
-                                 "suppressing alert")
-                    return True
-                else:
-                    LOGGER.debug("Instance status looks like autoscaling"
-                                 " instance, supressing alert")
-                    return True
-    except KeyError:
-        LOGGER.debug("Alert is not instance specific or host tag is missing")
-    finally:
-        # To limit the number of API queries, chech for stale alerts here
-        remove_stale_alerts(instance_info)
-    return False
-
-
-def datestr_to_datetime(datestr):
-    m = re.match(
-        "20[0-9]{2}-[0-2][0-9]-[0-3][0-9]T[0-2][0-9](:[0-5][0-9]){2}", datestr)
-    if m:
-        return datetime.strptime(m.group(0), '%Y-%m-%dT%H:%M:%S')
+            starttime = int((time.time() - 14400) * 1000)
+            stoptime = int(time.time() * 1000)
+        urlvars = []
+        for var in app.config['GRAFANA_URL_VARS']:
+            urlvars.extend(
+                [tag['value'] for tag in al.tags if tag['key'] == var])
+        if len(urlvars) != len(app.config['GRAFANA_URL_VARS']):
+            LOGGER.error("Failed setting Grafana url, missing variables")
+            return None
+        url = app.config['GRAFANA_URL'].format(*urlvars, starttime, stoptime)
+        return url
     return None
 
 
-def get_hash(al):
-    alhash = hashlib.sha256(al.id.encode()).hexdigest()
-    LOGGER.debug('Alert hash: %s', alhash)
-    return alhash
-
-
-def update_active_alerts(al):
-    alhash = get_hash(al)
+def update_active_alerts(al, alhash):
     if al.level != 'OK' and alhash in ACTIVE_ALERTS:
         LOGGER.debug("Updating active alert")
         ACTIVE_ALERTS[alhash] = al
@@ -249,17 +281,17 @@ def update_active_alerts(al):
         update_statistics(alhash, al)
 
 
-def update_influxdb(al):
+def update_influxdb(al, alhash):
     if app.config['INFLUXDB_ENABLED'] is True:
         if al.level != al.previouslevel:
             LOGGER.debug("Updating InfluxDB")
-            update_db(influxify(al, "logs"))
+            update_db(influxify(al, alhash, "logs"))
             if al.level == 'OK':
                 delete_active(al)
             else:
-                update_db(influxify(al, "active", True))
+                update_db(influxify(al, alhash, "active", True))
         else:
-            update_db(influxify(al, "active", True))
+            update_db(influxify(al, alhash, "active", True))
 
 
 def update_db(data):
@@ -268,6 +300,8 @@ def update_db(data):
         db.write_points([data])
     except InfluxDBClientError as err:
         LOGGER.error("Error(%s) - %s", err.code, err.content)
+    except requests.ConnectionError as err:
+        LOGGER.error(err)
 
 
 def delete_active(al):
@@ -288,7 +322,7 @@ def remove_stale_alerts(aws_instances):
             continue
         else:
             if not (x[0] in aws_instances and
-                    aws_instances[x[0]] in [16, 64, 80]):
+                    aws_instances[x[0]]['state'] in [16, 64, 80]):
                 LOGGER.debug(
                     "Stale alert found, host not in aws instance list")
                 LOGGER.debug("Removing stale alert")
@@ -303,12 +337,11 @@ def remove_stale_alerts(aws_instances):
                     jira.post(alert=al)
 
 
-def influxify(al, measurement, zero_time=False):
+def influxify(al, alhash, measurement, zero_time=False):
     LOGGER.debug("Creating InfluxDB json data")
     # Used to count currently active alerts
     if zero_time:
         LOGGER.debug("Creating zero time data")
-        alhash = get_hash(al)
         json_body = {
             "measurement": measurement,
             "tags": {
@@ -364,8 +397,7 @@ def initialize_stats_counters(al):
     return stats
 
 
-def get_pagerduty_incident_key(al):
-    alhash = get_hash(al)
+def get_pagerduty_incident_key(alhash):
     if alhash in ACTIVE_ALERTS:
         existing = ACTIVE_ALERTS[alhash]
         if existing.pd_incident_key:
@@ -374,8 +406,7 @@ def get_pagerduty_incident_key(al):
     return None
 
 
-def get_jira_issue(al):
-    alhash = get_hash(al)
+def get_jira_issue(alhash):
     if alhash in ACTIVE_ALERTS:
         existing = ACTIVE_ALERTS[alhash]
         if existing.jira_issue:
@@ -562,8 +593,28 @@ def update_aws_instance_info():
     for i in instances:
         x = [tag['Value'] for tag in i.get('Tags') if tag['Key'] == 'Name']
         if x:
-            instance_status[x[0]] = i.get('State')['Code']
+            env = [tag['Value'] for tag in i.get('Tags')
+                   if tag['Key'] == 'Environment']
+            if env:
+                s = {'env': env[0], 'state': i.get('State')['Code']}
+            else:
+                s = {'state': i.get('State')['Code']}
+            instance_status[x[0]] = s
     return instance_status
+
+
+def datestr_to_datetime(datestr):
+    m = re.match(
+        "20[0-9]{2}-[0-2][0-9]-[0-3][0-9]T[0-2][0-9](:[0-5][0-9]){2}", datestr)
+    if m:
+        return datetime.strptime(m.group(0), '%Y-%m-%dT%H:%M:%S')
+    return None
+
+
+def get_hash(al):
+    alhash = hashlib.sha256(al.id.encode()).hexdigest()
+    LOGGER.debug('Alert hash: %s', alhash)
+    return alhash
 
 
 def write_json(path, content):

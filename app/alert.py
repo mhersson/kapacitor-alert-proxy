@@ -7,7 +7,7 @@ Created by: Morten Hersson, <mhersson@gmail.com>
 '''
 
 
-class Alert(object):
+class Alert():
     def __init__(self, alertid, duration, message,
                  level, previouslevel, alerttime, tags):
         self.id = alertid
@@ -19,11 +19,13 @@ class Alert(object):
         self.tags = tags
         self.pd_incident_key = None
         self.jira_issue = None
+        self.grafana_url = None
 
     def __repr__(self):
         return ("Alert(id={}, duration={}, message={}, level={}, "
                 "previouslevel={}, time={}, tags={}, "
-                "pd_incident_key={}, jira_issue={})".format(
+                "pd_incident_key={}, jira_issue={}, "
+                "grafana_url={})".format(
                     self.id,
                     self.duration,
                     self.message,
@@ -32,5 +34,6 @@ class Alert(object):
                     self.time,
                     self.tags,
                     self.pd_incident_key,
-                    self.jira_issue
+                    self.jira_issue,
+                    self.grafana_url
                 ))

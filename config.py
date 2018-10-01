@@ -72,3 +72,14 @@ class Config(object):
     # List of tagkey tagvalue dictionaries that will not trigger an alert
     JIRA_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
                           {'key': 'Environment', 'value': 'staging'}]
+
+    GRAFANA_ENABLED = False
+    # For this to work the url vars in Grafana must be among the tag
+    # values of the incoming alerts.
+    # Copy the link to the dashboard you want use replace the
+    # var-values with {}, and add the name to the GRAFANA_URL_VARS list
+    # in the precise same order as the appear in the url.
+    # Make sure the url ends with &from={}&to={} since KAP will always
+    # add start time and stop time to the url
+    GRAFANA_URL = ""
+    GRAFANA_URL_VARS = []

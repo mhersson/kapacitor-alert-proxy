@@ -1,6 +1,6 @@
 {% if schedule | length > 0 %}
 {% set weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] %}
-<div style="margin-top: 40px; text-align: left">
+<div style="margin-top: 20px; text-align: left">
     <h4>Scheduled:</h4>
 <div>
 <div>
@@ -39,8 +39,5 @@
                 {% endfor %}
         </tbody>
     </table>
-    <div style="text-align: right">
-        <small>All displayed times are local to the server</small>
-    <div>
 </div>
 {% endif %}

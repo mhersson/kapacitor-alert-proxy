@@ -3,6 +3,7 @@
 import os
 import logging
 import logging.handlers
+import datetime
 from flask import Flask
 
 from config import Config
@@ -14,10 +15,12 @@ app.secret_key = app.config['SECRET_KEY']
 INSTALLDIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           os.path.pardir)
 
+TZNAME = datetime.datetime.now(datetime.timezone.utc).astimezone().tzname()
+
 LOGGER = logging.getLogger(name="KAP")
 _file_handler = logging.handlers.RotatingFileHandler(
     os.path.join(INSTALLDIR, "logs", "kapacitoralertproxy.log"),
-    'a', 5000000, 5)
+    'a', 10000000, 5)
 _formatter = logging.Formatter("%(asctime)s - %(module)s.%(funcName)s:"
                                "%(lineno)d:%(levelname)s - %(message)s")
 _file_handler.setFormatter(_formatter)

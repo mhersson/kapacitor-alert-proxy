@@ -34,9 +34,13 @@ class Incident(object):
         return None
 
     def _create(self, alert):
+        desc = alert.message
+        if alert.grafana_url:
+            jira_link = "[Go to Grafana|{}]".format(alert.grafana_url)
+            desc = alert.message + " - " + jira_link
         issue_dict = {'project': {'key': self._project_key},
                       'summary': alert.id,
-                      'description': alert.message,
+                      'description': desc,
                       # 'assignee': {'name': self._assignee},
                       'components': [{'name': self._assignee}],
                       'issuetype': {'name': 'Incident'},
