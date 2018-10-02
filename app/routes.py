@@ -249,12 +249,15 @@ def run_jira(in_maintenance, al):
 def add_grafana_url(al):
     if app.config['GRAFANA_ENABLED']:
         LOGGER.debug("Adding Grafana url")
-        # Show from 2 hours before alert until 2 hours after
-        if al.duration > 14400:
-            starttime = int((time.time() - al.duration - 7200) * 1000)
-            stoptime = int((time.time() - al.duration + 7200) * 1000)
+        # Show from 12 hours before alert until 12 hours after
+        # Do 12 hours to compensate for time zone differences
+        # Does not matter what time zone one is in, the time of
+        # the event should be visible
+        if al.duration > 86400:
+            starttime = int((time.time() - al.duration - 43200) * 1000)
+            stoptime = int((time.time() - al.duration + 43200) * 1000)
         else:
-            starttime = int((time.time() - 14400) * 1000)
+            starttime = int((time.time() - 86400) * 1000)
             stoptime = int(time.time() * 1000)
         urlvars = []
         for var in app.config['GRAFANA_URL_VARS']:
