@@ -177,37 +177,45 @@ def check_instance_tags(instance_tags):
     # Try to find out if alert is from a normal ec2 instance or autoscaling
     # instance, and then suppress alerts from terminated autoscaling instances
     # If instance is valid and running, check that the Environment tag exists,
-    # if not try to add it from aws info (this will be the case for e.g ping
+    # if not try to add it from aws info (this would be the case for e.g ping
     # test ran outside of the instance environment)
     instance_info = update_aws_instance_info()
     try:
         LOGGER.debug("Checking incoming host tag")
         x = [tag['value'] for tag in instance_tags if tag['key'] == 'host']
         if not x:
-            raise KeyError
-        else:
-            LOGGER.debug("Host tag found, %s", x[0])
-            if instance_info:
-                if (x[0] in instance_info and
-                        instance_info[x[0]]['state'] in [16, 64, 80]):
-                    LOGGER.debug("Instance Name exists and status code is "
-                                 "valid, %s - %d", x[0],
-                                 instance_info[x[0]]['state'])
-                    env = [tag['value'] for tag in instance_tags
-                           if tag['key'] == 'Environment']
-                    if not env:
-                        LOGGER.debug("Adding missing Environment tag")
-                        instance_tags['Environment'] = \
-                            instance_info[x[0]]['state']['env']
-                        return False, instance_tags
-                elif x[0] not in instance_info:
-                    LOGGER.error("Instance host tag not in instance list, "
-                                 "suppressing alert")
-                    return True, None
-                else:
-                    LOGGER.debug("Instance status looks like autoscaling"
-                                 " instance, supressing alert")
-                    return True, None
+            # Telegraf input plugin ping uses tag url and not host
+            # so try and use that if host does not exist
+            x = [tag['value'] for tag in instance_tags if tag['key'] == 'url']
+            if not x:
+                raise KeyError
+            LOGGER.debug("Using url as host tag")
+            instance_tags.append({'key': 'host', 'value': x[0]})
+        LOGGER.debug("Host tag, %s", x[0])
+        if instance_info:
+            if (x[0] in instance_info and
+                    instance_info[x[0]]['state'] in [16, 64, 80]):
+                LOGGER.debug("Instance Name exists and status code is "
+                             "valid, %s - %d", x[0],
+                             instance_info[x[0]]['state'])
+                env = [tag['value'] for tag in instance_tags
+                       if tag['key'] == 'Environment']
+                if not env or env == ['']:
+                    # Remove the old Environment tag if env == ['']
+                    tags = [tag for tag in instance_tags
+                            if tag['key'] != 'Environment']
+                    LOGGER.debug("Adding missing Environment tag")
+                    tags.append({'key': 'Environment',
+                                 'value': instance_info[x[0]]['env']})
+                    return False, tags
+            elif x[0] not in instance_info:
+                LOGGER.error("Instance host tag not in instance list, "
+                             "suppressing alert")
+                return True, None
+            else:
+                LOGGER.debug("Instance status looks like autoscaling"
+                             " instance, supressing alert")
+                return True, None
     except KeyError:
         LOGGER.debug("Alert is not instance specific or host tag is missing")
     finally:
