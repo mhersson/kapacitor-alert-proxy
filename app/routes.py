@@ -187,7 +187,7 @@ def check_instance_tags(instance_tags):
             # Telegraf input plugin ping uses tag url and not host
             # so try and use that if host does not exist
             x = [tag['value'] for tag in instance_tags if tag['key'] == 'url']
-            if not x:
+            if not x or x[0].startswith("http"):
                 raise KeyError
             LOGGER.debug("Using url as host tag")
             instance_tags.append({'key': 'host', 'value': x[0]})
