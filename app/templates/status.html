@@ -37,7 +37,7 @@
               <tr class="table-info">
               {% endif %}
             {% endif %}
-                <td>{{ a.time }}</td>
+                <td>{{ a.time | ctime(True) }}</td>
                 <td>{{ a.message | truncate }}
                 {% if a.grafana_url %}
                 <a target="_blank" href="{{ a.grafana_url }}">Go to Grafana</a>

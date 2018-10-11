@@ -12,8 +12,9 @@ import json
 import time
 import boto3
 import hashlib
-import subprocess
 import requests
+import calendar
+import subprocess
 from datetime import datetime, timedelta
 from flask import Response, request, render_template, redirect
 from influxdb import InfluxDBClient
@@ -131,7 +132,11 @@ def ticks():
 
 
 @app.template_filter('ctime')
-def timectime(s):
+def timectime(s, use_tz=False):
+    if use_tz:
+        tzdiff = calendar.timegm(
+            time.localtime()) - calendar.timegm(time.gmtime())
+        return time.ctime(s + tzdiff)
     return time.ctime(s)
 
 
@@ -160,7 +165,7 @@ def create_alert(content):
                duration=content['duration'] // (10 ** 9),
                message=content['message'], level=content['level'],
                previouslevel=content['previousLevel'],
-               alerttime=datestr_to_datetime(datestr=content['time']),
+               alerttime=datestr_to_timestamp(datestr=content['time']),
                tags=tags)
     LOGGER.debug(al)
 
@@ -184,9 +189,12 @@ def check_instance_tags(instance_tags):
         LOGGER.debug("Checking incoming host tag")
         x = [tag['value'] for tag in instance_tags if tag['key'] == 'host']
         if not x:
-            # Telegraf input plugin ping uses tag url and not host
+            # Telegraf input plugin ping uses tag url
+            # and net_response uses server and not host
             # so try and use that if host does not exist
-            x = [tag['value'] for tag in instance_tags if tag['key'] == 'url']
+            # but check that aint a proper web url
+            x = [tag['value'] for tag in instance_tags
+                 if tag['key'] in ['url', 'server']]
             if not x or x[0].startswith("http"):
                 raise KeyError
             LOGGER.debug("Using url as host tag")
@@ -262,11 +270,11 @@ def add_grafana_url(al):
         # Does not matter what time zone one is in, the time of
         # the event should be visible
         if al.duration > 86400:
-            starttime = int((time.time() - al.duration - 43200) * 1000)
-            stoptime = int((time.time() - al.duration + 43200) * 1000)
+            starttime = int(time.time() - al.duration - 43200) * 1000
+            stoptime = int(time.time() - al.duration + 43200) * 1000
         else:
-            starttime = int((time.time() - 86400) * 1000)
-            stoptime = int(time.time() * 1000)
+            starttime = int(time.time() - 86400) * 1000
+            stoptime = int(time.time()) * 1000
         urlvars = []
         for var in app.config['GRAFANA_URL_VARS']:
             urlvars.extend(
@@ -614,11 +622,12 @@ def update_aws_instance_info():
     return instance_status
 
 
-def datestr_to_datetime(datestr):
+def datestr_to_timestamp(datestr):
     m = re.match(
         "20[0-9]{2}-[0-2][0-9]-[0-3][0-9]T[0-2][0-9](:[0-5][0-9]){2}", datestr)
     if m:
-        return datetime.strptime(m.group(0), '%Y-%m-%dT%H:%M:%S')
+        return datetime.timestamp(
+            datetime.strptime(m.group(0), '%Y-%m-%dT%H:%M:%S'))
     return None
 
 
