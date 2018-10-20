@@ -32,6 +32,14 @@ class Config(object):
                         ('host', 'Host'),
                         ('id', 'Id')]   # This is the alert id
 
+    # Send Active Alerts to KAOS
+    KAOS_ENABLED = False
+    KAOS_CUSTOMER = "Test-Customer"
+    KAOS_URL = "https://localhost/kaos/update/"
+    KAOS_CERT = "server_bundle.pem"
+    KAOS_IGNORE_MAINTENANCE = False
+    KAOS_EXCLUDED_TAGS = []
+
     # Write stats to influxdb
     INFLUXDB_ENABLED = True
     INFLUXDB_HOST = 'localhost'

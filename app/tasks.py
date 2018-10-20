@@ -7,12 +7,58 @@ Created by: Morten Hersson, <morten@escenic.com>
 Copyright (c) 2018 Morten Hersson
 """
 import os
+import time
+import calendar
 import datetime
 import re
 import json
+import requests
 
-import app.routes
-from app import INSTALLDIR, LOGGER
+from app import app, routes, INSTALLDIR, LOGGER
+
+
+class KAOS():
+    def __init__(self):
+        LOGGER.debug("Initiating KAOS scheduler")
+
+    def run(self):
+        kaos_report = {app.config['KAOS_CUSTOMER']: []}
+        mrules = routes.load_mrules()
+        for v in routes.getActiveAlerts():
+            if (app.config['KAOS_IGNORE_MAINTENANCE'] or
+                    not routes.affected_by_mrules(mrules, v)):
+                if routes.contains_excluded_tags(
+                        app.config['KAOS_EXCLUDED_TAGS'], v.tags):
+                    continue
+                # Create a copy we can play with
+                al_dict = dict(v.__dict__)
+                al_dict['message'] = routes.truncate_string(al_dict['message'])
+                al_dict['time'] = self._fixtimezone(al_dict['time'])
+                # GO-lint complains about underscores in variables
+                # and there is no way do selectivly disable it,
+                # so to make the go linter shut up when developing KAOS
+                # I just renamed the keys here.
+                al_dict['GrafanaURL'] = al_dict.pop('grafana_url')
+                al_dict['PDIncidentKey'] = al_dict.pop('pd_incident_key')
+                al_dict['JiraIssue'] = al_dict.pop('jira_issue')
+                kaos_report[app.config['KAOS_CUSTOMER']].append(al_dict)
+        self._send_report(kaos_report)
+
+    @staticmethod
+    def _send_report(kaos_report):
+        LOGGER.debug("Sending KAOS report")
+        try:
+            requests.post(app.config['KAOS_URL'],
+                          verify=app.config['KAOS_CERT'],
+                          json=kaos_report, timeout=5)
+        except requests.exceptions.RequestException:
+            LOGGER.exception("Failed posting to KAOS")
+
+    @staticmethod
+    def _fixtimezone(s):
+        tzdiff = calendar.timegm(
+            time.localtime()) - calendar.timegm(time.gmtime())
+        return s + tzdiff
 
 
 class MaintenanceScheduler():
@@ -32,9 +78,9 @@ class MaintenanceScheduler():
                         and self._check_starttime(now, schedule['starttime'])):
                     LOGGER.debug("Activating scheduled maintenance")
                     LOGGER.debug("Schedule: %s", str(schedule))
-                    app.routes.activate_maintenance(schedule['key'],
-                                                    schedule['value'],
-                                                    schedule['duration'])
+                    routes.activate_maintenance(schedule['key'],
+                                                schedule['value'],
+                                                schedule['duration'])
                     schedule['runcounter'] = self._update_run_counter(
                         now, schedule['runcounter'])
                     self._write_file(filename, schedule)

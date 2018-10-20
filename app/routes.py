@@ -58,6 +58,9 @@ jira = Incident(
     assignee=app.config['JIRA_ASSIGNEE'])
 
 
+def getActiveAlerts():
+    return ACTIVE_ALERTS.values()
+
 @app.route("/kap/alert", methods=['post'])
 def alert():
     LOGGER.debug("Received new data")
@@ -518,7 +521,7 @@ def load_mrules():
 
 
 def affected_by_mrules(mrules, al):
-    LOGGER.debug("Checking maintenance")
+    # LOGGER.debug("Checking maintenance")
     # If this is an alert OK with an existing ticket, override maintenace
     if ((al.previouslevel != 'OK' and al.level == 'OK') and
             (al.jira_issue is not None or al.pd_incident_key is not None)):
@@ -540,7 +543,6 @@ def affected_by_mrules(mrules, al):
 
 
 def contains_excluded_tags(excluded, tags):
-    LOGGER.debug("Excluded: %s", str(excluded))
     x = [t for t in tags if t in excluded]
     if x:
         LOGGER.debug("One or more tags in exclude list: %s", str(x))
@@ -558,7 +560,6 @@ def contains_excluded_tags(excluded, tags):
             if not set(x).isdisjoint(y[0].split("|")):
                 LOGGER.debug("Excluded MonGroup: %s", y[0])
                 return True
-    LOGGER.debug("No tags in exclude list")
     return False
 
 
