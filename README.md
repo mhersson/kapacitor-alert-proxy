@@ -3,10 +3,21 @@
 ## README
 
 
-## Goals
-* Add the ability to set instances or groups of instances in maintenance
+## Features
+* Set instances or groups of instances in maintenance
+* Schedule maintenance in advance, and repeat on regular intervals
+* Supports multiple targets Slack, PagerDuty, Jira and KAOS
 * Configurable per target. e.g continue sending to Slack, while stop sending to PagerDuty.
-* Support multiple targets, first priority is Slack, PagerDuty and Jira
+* Exclude alerts on tags or alert id
+* Write status logs and status to Influxdb
+* Show links to Grafana in the alert message from the exact time the alert occured
+
+
+## KAOS
+Running multiple instances of KAP
+Take a look at KAOS: https://gitlab.com/mhersson/kaos
+
+Kapacitor Alert Overview System, consolidate alert statuses from multiple KAP instances into one overview
 
 
 ## Install
@@ -28,10 +39,11 @@ options:
 ```
 
 Navigate your browser to `http://localhost:9095/kap/maintenance`
-Duration has to be set using this format: `<number>[d|h|m]`
+Duration has to be set using this format: `<number>[d|h|m|w]`
 
 There is also a status page showing current active alerts
 `http://localhost:9095/kap/status`
 
 and a statistics page
 `http://localhost:9095/kap/statistics`
+
