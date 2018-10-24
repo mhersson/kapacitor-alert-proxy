@@ -611,7 +611,11 @@ def update_aws_instance_info():
     instance_status = {}
     LOGGER.debug("Updating instances and status codes")
     for i in instances:
-        x = [tag['Value'] for tag in i.get('Tags') if tag['Key'] == 'Name']
+        try:
+            x = [tag['Value'] for tag in i.get('Tags') if tag['Key'] == 'Name']
+        except TypeError:
+            # Skip instance if no tags are set
+            continue
         if x:
             env = [tag['Value'] for tag in i.get('Tags')
                    if tag['Key'] == 'Environment']
