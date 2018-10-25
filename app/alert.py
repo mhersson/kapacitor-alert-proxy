@@ -20,12 +20,16 @@ class Alert():
         self.pd_incident_key = None
         self.jira_issue = None
         self.grafana_url = None
+        self.count = 1
+        self.state_duration = False
+        self.sent = False
 
     def __repr__(self):
         return ("Alert(id={}, duration={}, message={}, level={}, "
                 "previouslevel={}, time={}, tags={}, "
                 "pd_incident_key={}, jira_issue={}, "
-                "grafana_url={})".format(
+                "grafana_url={}, count={}, state_duration={}, "
+                "sent={})".format(
                     self.id,
                     self.duration,
                     self.message,
@@ -35,5 +39,8 @@ class Alert():
                     self.tags,
                     self.pd_incident_key,
                     self.jira_issue,
-                    self.grafana_url
+                    self.grafana_url,
+                    self.count,
+                    self.state_duration,
+                    self.sent
                 ))

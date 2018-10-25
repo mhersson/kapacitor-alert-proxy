@@ -11,6 +11,8 @@ import re
 import json
 import time
 import boto3
+import atexit
+import signal
 import hashlib
 import requests
 import calendar
@@ -31,6 +33,7 @@ from app.forms.maintenance import ActivateForm, DeactivateForm, DeleteSchedule
 
 STARTUP_TIME = time.time()
 
+ACTIVE_ALERTS_FILE = "/tmp/kap-active-alerts.json"
 ACTIVE_ALERTS = {}
 STATISTICS = {}
 INSTANCES = {}
@@ -58,9 +61,6 @@ jira = Incident(
     assignee=app.config['JIRA_ASSIGNEE'])
 
 
-def getActiveAlerts():
-    return ACTIVE_ALERTS.values()
-
 @app.route("/kap/alert", methods=['post'])
 def alert():
     LOGGER.debug("Received new data")
@@ -70,13 +70,49 @@ def alert():
         al.pd_incident_key = get_pagerduty_incident_key(alhash)
         al.jira_issue = get_jira_issue(alhash)
         al.grafana_url = add_grafana_url(al)
-        mrules = load_mrules()
-        in_maintenance = affected_by_mrules(mrules, al)
-        run_slack(in_maintenance, al)
-        al.pd_incident_key = run_pagerduty(in_maintenance, al)
-        al.jira_issue = run_jira(in_maintenance, al)
-        update_active_alerts(al, alhash)
-        update_influxdb(al, alhash)
+        al.count = get_consecutive_count(alhash)
+        al.state_duration = state_duration(al)
+        al.sent = get_sent_status(alhash)
+        LOGGER.debug(al)
+        if (app.config['FLAPPING_DETECTION_ENABLED'] and
+                al.count < app.config['FLAPPING_DETECTION_COUNT']):
+            LOGGER.debug("Held back by flapping detection")
+            dispatch_and_update_status(al, alhash, dispatch=False)
+            return Response(response={'Success': True},
+                            status=200, mimetype='application/json')
+        if (app.config['FLAPPING_DETECTION_ENABLED'] and
+                al.count == app.config['FLAPPING_DETECTION_COUNT']):
+            # Reset the previous level to OK, so this looks like a new
+            # alert for the targets
+            if al.level != 'OK':
+                al.previouslevel = 'OK'
+            elif al.level == 'OK':
+                dispatch_and_update_status(al, alhash, dispatch=False)
+                return Response(response={'Success': True},
+                                status=200, mimetype='application/json')
+        if al.state_duration:
+            LOGGER.debug("State duration set, updating alert without dispatch")
+            dispatch_and_update_status(al, alhash, dispatch=False)
+        else:
+            LOGGER.debug("State duration not set")
+            if alhash in ACTIVE_ALERTS:
+                previous_al = ACTIVE_ALERTS[alhash]
+                if previous_al.state_duration is True and al.level == 'OK':
+                    LOGGER.debug("State duration was True last time, "
+                                 "alert is now OK, updating without dispatch")
+                    dispatch_and_update_status(al, alhash, dispatch=False)
+                elif previous_al.state_duration is True and al.level != 'OK':
+                    LOGGER.debug("State duration was True last time, "
+                                 "alert is not OK, setting previous level OK, "
+                                 "to run a full dispatch")
+                    al.previouslevel = "OK"
+                    dispatch_and_update_status(al, alhash)
+                else:
+                    LOGGER.debug("In active alerts, running full dispatch")
+                    dispatch_and_update_status(al, alhash)
+            else:
+                LOGGER.debug("Not in active alerts, running full dispatch")
+                dispatch_and_update_status(al, alhash)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
 
@@ -155,6 +191,10 @@ def truncate_string(s):
     return s
 
 
+def getActiveAlerts():
+    return ACTIVE_ALERTS.values()
+
+
 def create_alert(content):
     LOGGER.debug("Creating alert")
     tags = []
@@ -170,7 +210,6 @@ def create_alert(content):
                previouslevel=content['previousLevel'],
                alerttime=datestr_to_timestamp(datestr=content['time']),
                tags=tags)
-    LOGGER.debug(al)
 
     if app.config['AWS_API_ENABLED']:
         suppress, modified_tags = check_instance_tags(tags)
@@ -235,6 +274,22 @@ def check_instance_tags(instance_tags):
     return False, None
 
 
+def dispatch_and_update_status(al, alhash, dispatch=True):
+    if dispatch:
+        if not al.sent and al.level == 'OK':
+            LOGGER.debug("Alert message not sent, suppressing OK")
+        else:
+            LOGGER.debug("Dispatch to all targets")
+            al.sent = True
+            mrules = load_mrules()
+            in_maintenance = affected_by_mrules(mrules, al)
+            run_slack(in_maintenance, al)
+            al.pd_incident_key = run_pagerduty(in_maintenance, al)
+            al.jira_issue = run_jira(in_maintenance, al)
+    update_active_alerts(al, alhash)
+    update_influxdb(al, alhash)
+
+
 def run_slack(in_maintenance, al):
     if app.config['SLACK_ENABLED'] and (
             not in_maintenance or
@@ -288,6 +343,14 @@ def add_grafana_url(al):
         url = app.config['GRAFANA_URL'].format(*urlvars, starttime, stoptime)
         return url
     return None
+
+
+def state_duration(al):
+    for key in app.config['STATE_DURATION']:
+        if al.id.find(key) != -1:
+            if al.duration < app.config['STATE_DURATION'][key]:
+                return True
+    return False
 
 
 def update_active_alerts(al, alhash):
@@ -417,6 +480,20 @@ def initialize_stats_counters(al):
              'WARNING': {'count': 0, 'duration': 0},
              'CRITICAL': {'count': 0, 'duration': 0}}
     return stats
+
+
+def get_consecutive_count(alhash):
+    if alhash in ACTIVE_ALERTS:
+        existing = ACTIVE_ALERTS[alhash]
+        return existing.count + 1
+    return 1
+
+
+def get_sent_status(alhash):
+    if alhash in ACTIVE_ALERTS:
+        existing = ACTIVE_ALERTS[alhash]
+        return existing.sent
+    return False
 
 
 def get_pagerduty_incident_key(alhash):
@@ -656,3 +733,31 @@ def load_json(path):
             return json.loads(f.read())
     except OSError:
         LOGGER.error("Failed reading %s", path)
+
+
+@atexit.register
+def dump_active_alerts(*args):
+    dump = {}
+    for k, v in ACTIVE_ALERTS.items():
+        dump[k] = v.__dict__
+    write_json(ACTIVE_ALERTS_FILE, dump)
+    LOGGER.debug(str(args))
+
+
+def load_active_alerts():
+    dump = {}
+    if os.path.exists(ACTIVE_ALERTS_FILE):
+        dump = load_json(ACTIVE_ALERTS_FILE)
+    if dump:
+        for k, v in dump.items():
+            al = Alert(v['id'], v['duration'], v['message'], v['level'],
+                       v['previouslevel'], v['time'], v['tags'])
+            al.count = v['count']
+            al.pd_incident_key = v['pd_incident_key']
+            al.jira_issue = v['jira_issue']
+            al.grafana_url = v['grafana_url']
+            ACTIVE_ALERTS[k] = al
+
+
+load_active_alerts()
+signal.signal(signal.SIGTERM, dump_active_alerts)
