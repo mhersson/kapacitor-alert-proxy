@@ -12,12 +12,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 
 if __name__ == '__main__':
-    task = MaintenanceScheduler()
+    task1 = MaintenanceScheduler()
     scheduler = BackgroundScheduler()
-    scheduler.add_job(task.run, 'interval', seconds=60)
+    scheduler.add_job(task1.run, 'interval', seconds=60)
     if app.config['KAOS_ENABLED']:
-        kaos = KAOS()
-        scheduler.add_job(kaos.run, 'interval', seconds=30)
+        task2 = KAOS()
+        scheduler.add_job(task2.run, 'interval', seconds=30)
     scheduler.start()
     app.run(host=app.config['SERVER_ADDRESS'], port=app.config['SERVER_PORT'],
             debug=False, threaded=True)

@@ -19,7 +19,7 @@ class Config(object):
     # terminated auto-scaling instances, and remove stale alerts from
     # all types of terminated instances - AWS API Gateway prices apply
     # https://aws.amazon.com/api-gateway/pricing/
-    AWS_API_ENABLED = True
+    AWS_API_ENABLED = False
     AWS_REGION = "eu-west-1"
 
     # Tag used in most or all of kapacitor queries as .groupBy()
@@ -32,6 +32,19 @@ class Config(object):
                         ('host', 'Host'),
                         ('id', 'Id')]   # This is the alert id
 
+    # With flapping detection enabled KAP will not forward alerts to targets
+    # unless it receives the number of consecutive alerts defined by the
+    # FLAPPING_DETECTION_COUNT setting
+    # If both FLAPPING_DETECTION and STATE_DURATION is active STATE_DURATION
+    # will kick in after the consecutive count has been reach and could
+    # further delay the alert
+    FLAPPING_DETECTION_ENABLED = False
+    FLAPPING_DETECTION_COUNT = 2
+    # Delay forwarding alerts until they have been in
+    # alerting state for the given number of seconds
+    # {"match string", delay secs} - match string must be part of the alert id
+    STATE_DURATION = {}
+
     # Send Active Alerts to KAOS
     KAOS_ENABLED = False
     KAOS_CUSTOMER = "Test-Customer"
@@ -41,7 +54,7 @@ class Config(object):
     KAOS_EXCLUDED_TAGS = []
 
     # Write stats to influxdb
-    INFLUXDB_ENABLED = True
+    INFLUXDB_ENABLED = False
     INFLUXDB_HOST = 'localhost'
     INFLUXDB_PORT = 8086
 
