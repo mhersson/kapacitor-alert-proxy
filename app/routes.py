@@ -427,10 +427,18 @@ def influxify(al, alhash, measurement, zero_time=False):
     # Used to count currently active alerts
     if zero_time:
         LOGGER.debug("Creating zero time data")
+        try:
+            env = [tag['value'] for tag in al.tags
+                    if tag['key'] == 'Environment'][0]
+        except KeyError:
+            env = None
+        if env == ['']:
+            env = None
         json_body = {
             "measurement": measurement,
             "tags": {
-                "hash": alhash},
+                "hash": alhash,
+                "Environment": env},
             "fields": {
                 "level": al.level,
                 "id": al.id},
