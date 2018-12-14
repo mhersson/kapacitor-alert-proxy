@@ -294,7 +294,9 @@ def run_slack(in_maintenance, al):
     if app.config['SLACK_ENABLED'] and (
             not in_maintenance or
             app.config['SLACK_IGNORE_MAINTENANCE']):
-        slack.post(al)
+        if not contains_excluded_tags(
+                app.config['SLACK_EXCLUDED_TAGS'], al.tags):
+            slack.post(al)
 
 
 def run_pagerduty(in_maintenance, al):
@@ -429,7 +431,7 @@ def influxify(al, alhash, measurement, zero_time=False):
         LOGGER.debug("Creating zero time data")
         try:
             env = [tag['value'] for tag in al.tags
-                    if tag['key'] == 'Environment'][0]
+                   if tag['key'] == 'Environment'][0]
         except KeyError:
             env = None
         if env == ['']:
@@ -443,7 +445,7 @@ def influxify(al, alhash, measurement, zero_time=False):
                 "level": al.level,
                 "id": al.id},
             "time": 0
-            }
+        }
     else:
         json_body = {
             "measurement": measurement,
@@ -455,7 +457,7 @@ def influxify(al, alhash, measurement, zero_time=False):
                 "id": al.id,
                 "duration": al.duration,
                 "message": al.message}
-            }
+        }
         tags = json_body['tags']
         for t in al.tags:
             tags[t['key']] = t['value']

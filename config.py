@@ -68,6 +68,9 @@ class Config(object):
     SLACK_STATE_CHANGE_ONLY = True
     # Send alerts to slack even during maintenance
     SLACK_IGNORE_MAINTENANCE = False
+    # List of tagkey tagkey/value dictionaries that will not trigger slack
+    SLACK_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
+                           {'key': 'Environment', 'value': 'staging'}]
 
     # Pagerduty
     PAGERDUTY_ENABLED = False
