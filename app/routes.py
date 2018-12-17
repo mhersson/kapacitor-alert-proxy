@@ -230,6 +230,7 @@ def check_instance_tags(instance_tags):
     try:
         LOGGER.debug("Checking incoming host tag")
         x = [tag['value'] for tag in instance_tags if tag['key'] == 'host']
+        url = False  # Needed if host/url not in instance_info (f.ex ELB)
         if not x:
             # Telegraf input plugin ping uses tag url
             # and net_response uses server and not host
@@ -237,8 +238,13 @@ def check_instance_tags(instance_tags):
             # but check that aint a proper web url
             x = [tag['value'] for tag in instance_tags
                  if tag['key'] in ['url', 'server']]
-            if not x or x[0].startswith("http"):
+            if not x:
                 raise KeyError
+            if x[0].startswith("http"):
+                url = True  # Mark as url to raise KeyError if not found
+                # First remove http or https prefix, then split on : or /
+                # to get the hostname
+                x[0] = re.split(":|/", re.sub(r"http[s]?://", "", x[0]))[0]
             LOGGER.debug("Using url as host tag")
             instance_tags.append({'key': 'host', 'value': x[0]})
         LOGGER.debug("Host tag, %s", x[0])
@@ -258,6 +264,8 @@ def check_instance_tags(instance_tags):
                     tags.append({'key': 'Environment',
                                  'value': instance_info[x[0]]['env']})
                     return False, tags
+            elif x[0] not in instance_info and url:
+                raise KeyError
             elif x[0] not in instance_info:
                 LOGGER.error("Instance host tag not in instance list, "
                              "suppressing alert")
