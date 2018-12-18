@@ -32,7 +32,7 @@
                 <td style="text-align: center">
                     <form action="" method="POST">
                         {{ dsf.csrf_token }}
-                        {{ dsf.filename(value=sched.filename) }}
+                        {{ dsf.schedule_id(value=sched.schedule_id) }}
                         {{ dsf.submit(class="btn btn-sm btn-danger") }}
                     </form>
                 </td>

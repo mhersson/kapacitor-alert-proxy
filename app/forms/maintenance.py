@@ -45,5 +45,5 @@ class DeactivateForm(FlaskForm):
 
 
 class DeleteSchedule(FlaskForm):
-    filename = HiddenField(validators=[DataRequired()])
+    schedule_id = HiddenField(validators=[DataRequired()])
     submit = SubmitField('Delete')

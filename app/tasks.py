@@ -6,25 +6,74 @@ Created by: Morten Hersson, <morten@escenic.com>
 
 Copyright (c) 2018 Morten Hersson
 """
-import os
 import time
 import calendar
 import datetime
-import re
-import json
 import requests
 
-from app import app, routes, INSTALLDIR, LOGGER
+from app import app, routes, LOGGER
+from app.dbcontroller import DBController
+from app.alert import Alert
+
+
+class FlapDetective():
+    """Flapping detection class """
+
+    def __init__(self):
+        super(FlapDetective, self).__init__()
+        LOGGER.debug("Initiating flap detective")
+        self.db = DBController()
+        self.limit = 3
+
+    def run(self):
+        LOGGER.debug("Searching for flapping alerts")
+        logged_alerts = self.db.get_log_count()
+        flapping_alerts = self.db.get_flapping_alerts()
+        flaphash = [x[0] for x in flapping_alerts]
+        logged_hash = []
+        for a in logged_alerts:
+            logged_hash.append(a[0])
+            if a[2] >= self.limit and a[0] not in flaphash:
+                # Set flapping
+                self.db.set_flapping(a[0], a[1])
+                self.notify(a[1])
+            elif a[2] >= self.limit and a[0] in flaphash:
+                # Send reminder every hour if alert is still flapping
+                flaptime = [x[2] for x in flapping_alerts if x[0] == a[0]]
+                if 0 < (time.time() % 3600 - flaptime[0] % 3600) <= 60:
+                    self.notify(a[1], reminder=True)
+            elif a[2] < self.limit and a[0] in flaphash:
+                # Too low count to be marked as flapping
+                self.db.unset_flapping(a[0], a[1])
+                self.notify(a[1], flapping=False)
+        # If alert is no longer in the log it is not flapping, unset
+        for a in [(x[0], x[1]) for x in flapping_alerts
+                  if x[0] not in logged_hash]:
+            self.db.unset_flapping(a[0], a[1])
+
+    @staticmethod
+    def notify(alertid, flapping=True, reminder=False):
+        if app.config['SLACK_ENABLED']:
+            if flapping:
+                a = Alert(alertid, 0, "Flapping detected: " + alertid,
+                          'CRITICAL', 'OK', None, None)
+                if reminder:
+                    a.message = "Flapping detected (Reminder): " + alertid
+            else:
+                a = Alert(alertid, 0, "Flapping resolved: " + alertid,
+                          'OK', 'CRITICAL', None, None)
+            routes.slack.post(a)
 
 
 class KAOS():
     def __init__(self):
         LOGGER.debug("Initiating KAOS scheduler")
+        self.db = DBController()
 
     def run(self):
         kaos_report = {app.config['KAOS_CUSTOMER']: []}
-        mrules = routes.load_mrules()
-        for v in routes.getActiveAlerts():
+        mrules = self.db.get_active_maintenance_rules()
+        for v in self.db.get_active_alerts():
             if (app.config['KAOS_IGNORE_MAINTENANCE'] or
                     not routes.affected_by_mrules(mrules, v)):
                 if routes.contains_excluded_tags(
@@ -64,50 +113,27 @@ class KAOS():
 class MaintenanceScheduler():
     def __init__(self):
         LOGGER.debug("Initiating maintenance scheduler")
-        self._scheduledir = os.path.join(INSTALLDIR, "maintenance/schedule")
+        self.db = DBController()
 
     def run(self):
         now = datetime.datetime.today()
         LOGGER.debug("Checking maintenance schedule")
-        for sf in os.listdir(self._scheduledir):
-            m = re.match("schedule_([0-9]{10}).json", sf)
-            if m:
-                filename = os.path.join(self._scheduledir, sf)
-                schedule = self._read_file(filename)
-                if (self._check_day(now, schedule['days'])
-                        and self._check_starttime(now, schedule['starttime'])):
-                    LOGGER.debug("Activating scheduled maintenance")
-                    LOGGER.debug("Schedule: %s", str(schedule))
-                    routes.activate_maintenance(schedule['key'],
-                                                schedule['value'],
-                                                schedule['duration'])
-                    schedule['runcounter'] = self._update_run_counter(
-                        now, schedule['runcounter'])
-                    self._write_file(filename, schedule)
-                    if (self._schedule_completed(schedule['runcounter'])
-                            and not schedule['repeat']):
-                        LOGGER.debug("Deleting completed schedule")
-                        os.remove(os.path.join(self._scheduledir, sf))
-
-    @staticmethod
-    def _read_file(path):
-        try:
-            with open(path, 'r') as f:
-                return json.loads(f.read())
-        except (OSError, json.JSONDecodeError):
-            LOGGER.error("Failed to open file, %s", path)
-
-    @staticmethod
-    def _write_file(path, content):
-        try:
-            with open(path, 'w') as f:
-                return f.write(json.dumps(content) + "\n")
-        except OSError:
-            LOGGER.debug("Failed writing file, %s", path)
+        for schedule in self.db.get_maintenance_schedule():
+            if (self._check_day(now, schedule['days'])
+                    and self._check_starttime(now, schedule['starttime'])):
+                LOGGER.debug("Activating scheduled maintenance")
+                self.db.activate_maintenance(
+                    schedule['key'], schedule['value'], schedule['duration'])
+                self.db.update_day_runcounter(
+                    schedule['schedule_id'], now.weekday())
+                if 0 not in self.db.get_schedule_runcounter(
+                        schedule['schedule_id']) and not schedule['repeat']:
+                    self.db.delete_maintenance_schedule(
+                        schedule['schedule_id'])
 
     @staticmethod
     def _check_day(now, days):
-        return True if str(now.weekday()) in days else False
+        return bool(now.weekday() in days)
 
     @staticmethod
     def _check_starttime(now, starttime):
@@ -115,13 +141,3 @@ class MaintenanceScheduler():
         if int(hour) == now.hour and int(minute) == now.minute:
             return True
         return False
-
-    @staticmethod
-    def _update_run_counter(now, runcounter):
-        LOGGER.debug("Updating schedule run counter")
-        runcounter[str(now.weekday())] = runcounter[str(now.weekday())] + 1
-        return runcounter
-
-    @staticmethod
-    def _schedule_completed(runcounter):
-        return 0 not in set(v for v in runcounter.values())

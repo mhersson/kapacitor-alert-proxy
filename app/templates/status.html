@@ -17,15 +17,13 @@
             <tr>
                 <th>Last report</th>
                 <th>Alert message</th>
-                {% if group_tag %}
-                <th>{{ group_tag | title }}</th>
-                {% endif %}
+                <th>Environment</th>
                 <th>Duration</th>
                 <th>Level</th>
             </tr>
         </thead>
         <tbody>
-            {% for a in alerts.values() | sort(reverse=True, attribute='time') %}
+            {% for a in alerts | sort(reverse=True, attribute='time') %}
             {% if a in maintenance %}
             <tr class="table-primary">
             {% else %}
@@ -37,19 +35,20 @@
               <tr class="table-info">
               {% endif %}
             {% endif %}
-                <td>{{ a.time | ctime(True) }}</td>
+                <td>{{ a.time | ctime }}</td>
                 <td>{{ a.message | truncate }}
                 {% if a.grafana_url %}
                 <a target="_blank" href="{{ a.grafana_url }}">Go to Grafana</a>
-                {% endif%}
-                </td>
-                {% if group_tag %}
-                {% for tag in a.tags if tag.key == group_tag %}
-                <td>{{ tag.value }}</td>
-                {% else %}
-                <td>-</td>
-                {% endfor %}
                 {% endif %}
+                </td>
+		{% set var = {'environment': False} %}
+                {% for tag in a.tags if tag.key == 'Environment' %}
+                <td>{{ tag.value }}</td>
+		{% if var.update({'environment': True}) %}{% endif %}
+                {% endfor %}
+		{% if not var.environment %}
+	        <td>-</td>
+	        {% endif %}
                 <td class="text-right">{{ a.duration | timedelta }}</td>
                 <td>{{ a.level }}</td>
             </tr>

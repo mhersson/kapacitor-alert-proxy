@@ -6,16 +6,12 @@ Module: routes.py
 Created: 23.Mar.2018
 Created by: Morten Hersson, <mhersson@gmail.com>
 '''
-import os
 import re
-import json
 import time
 import boto3
-import atexit
-import signal
-import hashlib
 import requests
 import calendar
+import operator
 import subprocess
 from datetime import datetime, timedelta
 from flask import Response, request, render_template, redirect
@@ -24,23 +20,22 @@ from influxdb.exceptions import InfluxDBClientError
 from botocore.exceptions import NoCredentialsError, ProfileNotFound
 from botocore.exceptions import NoRegionError, ClientError
 
-from app import app, LOGGER, INSTALLDIR, TZNAME
+from app import app, LOGGER, TZNAME
 from app.alert import Alert
 from app.targets.slack import Slack
 from app.targets.pagerduty import Pagerduty
 from app.targets.jira import Incident
 from app.forms.maintenance import ActivateForm, DeactivateForm, DeleteSchedule
+from app.dbcontroller import DBController
 
 STARTUP_TIME = time.time()
 
-ACTIVE_ALERTS_FILE = "/tmp/kap-active-alerts.json"
-ACTIVE_ALERTS = {}
-STATISTICS = {}
 INSTANCES = {}
 
-db = InfluxDBClient(host=app.config['INFLUXDB_HOST'],
-                    port=app.config['INFLUXDB_PORT'],
-                    database='kap')
+db = DBController()
+influxdb = InfluxDBClient(host=app.config['INFLUXDB_HOST'],
+                          port=app.config['INFLUXDB_PORT'],
+                          database='kap')
 
 slack = Slack(
     url=app.config['SLACK_URL'],
@@ -66,53 +61,34 @@ def alert():
     LOGGER.debug("Received new data")
     al = create_alert(request.json)
     if al is not None:
-        alhash = get_hash(al)
-        al.pd_incident_key = get_pagerduty_incident_key(alhash)
-        al.jira_issue = get_jira_issue(alhash)
-        al.grafana_url = add_grafana_url(al)
-        al.count = get_consecutive_count(alhash)
-        al.state_duration = state_duration(al)
-        al.sent = get_sent_status(alhash)
+        al = db.get_tickets_and_keys(al)
         LOGGER.debug(al)
-        if (app.config['FLAPPING_DETECTION_ENABLED'] and
-                al.count < app.config['FLAPPING_DETECTION_COUNT']):
-            LOGGER.debug("Held back by flapping detection")
-            dispatch_and_update_status(al, alhash, dispatch=False)
+        if db.is_flapping(al):
+            LOGGER.debug("Alert is flapping")
+            al.message = "FLAPPING DETECTED! " + al.message
+            dispatch_and_update_status(al, dispatch=False)
             return Response(response={'Success': True},
                             status=200, mimetype='application/json')
-        if (app.config['FLAPPING_DETECTION_ENABLED'] and
-                al.count == app.config['FLAPPING_DETECTION_COUNT']):
-            # Reset the previous level to OK, so this looks like a new
-            # alert for the targets
-            if al.level != 'OK':
-                al.previouslevel = 'OK'
-            elif al.level == 'OK':
-                dispatch_and_update_status(al, alhash, dispatch=False)
-                return Response(response={'Success': True},
-                                status=200, mimetype='application/json')
-        if al.state_duration:
-            LOGGER.debug("State duration set, updating alert without dispatch")
-            dispatch_and_update_status(al, alhash, dispatch=False)
+        if al.state_duration or al.duration < app.config['ALERTING_DELAY']:
+            LOGGER.debug("Alert delayed, no dispatch")
+            dispatch_and_update_status(al, dispatch=False)
         else:
-            LOGGER.debug("State duration not set")
-            if alhash in ACTIVE_ALERTS:
-                previous_al = ACTIVE_ALERTS[alhash]
-                if previous_al.state_duration is True and al.level == 'OK':
-                    LOGGER.debug("State duration was True last time, "
-                                 "alert is now OK, updating without dispatch")
-                    dispatch_and_update_status(al, alhash, dispatch=False)
-                elif previous_al.state_duration is True and al.level != 'OK':
-                    LOGGER.debug("State duration was True last time, "
-                                 "alert is not OK, setting previous level OK, "
-                                 "to run a full dispatch")
-                    al.previouslevel = "OK"
-                    dispatch_and_update_status(al, alhash)
+            if db.is_active(al):
+                # Check state duration of active alert (previous)
+                sd = db.state_duration(al)
+                if ((sd or al.duration < app.config['ALERTING_DELAY'])
+                        and al.level == 'OK'):
+                    LOGGER.debug("Alert delayed, status OK, no dispatch")
+                    dispatch_and_update_status(al, dispatch=False)
+                elif ((sd or al.duration > app.config['ALERTING_DELAY'])
+                      and al.level != 'OK'):
+                    LOGGER.debug("Alert delayed, status NOT OK, full dispatch")
+                    al.previouslevel = "OK"  # Override to trigger state change
+                    dispatch_and_update_status(al)
                 else:
-                    LOGGER.debug("In active alerts, running full dispatch")
-                    dispatch_and_update_status(al, alhash)
+                    dispatch_and_update_status(al)
             else:
-                LOGGER.debug("Not in active alerts, running full dispatch")
-                dispatch_and_update_status(al, alhash)
+                dispatch_and_update_status(al)
     return Response(response={'Success': True},
                     status=200, mimetype='application/json')
 
@@ -124,21 +100,21 @@ def maintenance():
     dsf = DeleteSchedule()
     if af.validate_on_submit():
         if af.days.data and af.starttime.data != "":
-            schedule_maintenance(af.key.data, af.val.data, af.duration.data,
-                                 af.days.data, af.starttime.data,
-                                 af.repeat.data)
+            db.add_maintenance_schedule(af.starttime.data, af.duration.data,
+                                        af.key.data, af.val.data,
+                                        bool(af.repeat.data), af.days.data)
         else:
-            activate_maintenance(af.key.data, af.val.data, af.duration.data)
+            db.activate_maintenance(af.key.data, af.val.data, af.duration.data)
         return redirect('/kap/maintenance')
     if df.validate_on_submit():
-        deactive_maintenance(df.key.data, df.value.data,
-                             df.start.data, df.stop.data)
+        db.deactive_maintenance(df.start.data, df.stop.data,
+                                df.key.data, df.value.data)
         return redirect('/kap/maintenance')
     if dsf.validate_on_submit():
-        delete_schedule(dsf.filename.data)
+        db.delete_maintenance_schedule(int(dsf.schedule_id.data))
         return redirect('/kap/maintenance')
-    mrules = load_mrules()
-    schedule = load_schedule()
+    mrules = db.get_active_maintenance_rules()
+    schedule = db.get_maintenance_schedule()
     return render_template('maintenance.html', title="Maintenance",
                            mrules=mrules, schedule=schedule,
                            af=af, df=df, dsf=dsf, tzname=TZNAME)
@@ -146,21 +122,24 @@ def maintenance():
 
 @app.route("/kap/status", methods=['GET'])
 def status():
-    mrules = load_mrules()
+    mrules = db.get_active_maintenance_rules()
     aim = []
-    for a in ACTIVE_ALERTS:
-        if affected_by_mrules(mrules=mrules, al=ACTIVE_ALERTS[a]):
-            aim.append(ACTIVE_ALERTS[a])
+    active_alerts = db.get_active_alerts()
+    if active_alerts:
+        for a in active_alerts:
+            if affected_by_mrules(mrules=mrules, al=a):
+                aim.append(a)
     return render_template('status.html', title="Active alerts",
-                           group_tag=app.config['MAIN_GROUP_TAG'],
-                           alerts=ACTIVE_ALERTS, maintenance=aim,
+                           alerts=active_alerts, maintenance=aim,
                            tzname=TZNAME)
 
 
 @app.route("/kap/statistics", methods=['GET'])
 def statistics():
+    stats = db.get_24hours_stats()
+    stats.sort(key=operator.itemgetter(1, 2, 4))
     return render_template('statistics.html', title="Statistics",
-                           stats=STATISTICS, startup_time=STARTUP_TIME)
+                           stats=stats, startup_time=STARTUP_TIME)
 
 
 @app.route("/kap/ticks", methods=['GET'])
@@ -189,10 +168,6 @@ def truncate_string(s):
     if len(s) > 200:
         return s[:197] + "..."
     return s
-
-
-def getActiveAlerts():
-    return ACTIVE_ALERTS.values()
 
 
 def create_alert(content):
@@ -235,11 +210,11 @@ def check_instance_tags(instance_tags):
             # Telegraf input plugin ping uses tag url
             # and net_response uses server and not host
             # so try and use that if host does not exist
-            # but check that aint a proper web url
             x = [tag['value'] for tag in instance_tags
                  if tag['key'] in ['url', 'server']]
             if not x:
                 raise KeyError
+            # if the url or server is in fact url
             if x[0].startswith("http"):
                 url = True  # Mark as url to raise KeyError if not found
                 # First remove http or https prefix, then split on : or /
@@ -282,20 +257,20 @@ def check_instance_tags(instance_tags):
     return False, None
 
 
-def dispatch_and_update_status(al, alhash, dispatch=True):
+def dispatch_and_update_status(al, dispatch=True):
     if dispatch:
         if not al.sent and al.level == 'OK':
             LOGGER.debug("Alert message not sent, suppressing OK")
-        else:
+        elif not al.sent or (al.sent and al.level == 'OK'):
             LOGGER.debug("Dispatch to all targets")
             al.sent = True
-            mrules = load_mrules()
+            mrules = db.get_active_maintenance_rules()
             in_maintenance = affected_by_mrules(mrules, al)
             run_slack(in_maintenance, al)
             al.pd_incident_key = run_pagerduty(in_maintenance, al)
             al.jira_issue = run_jira(in_maintenance, al)
-    update_active_alerts(al, alhash)
-    update_influxdb(al, alhash)
+    update_active_alerts(al)
+    update_influxdb(al)
 
 
 def run_slack(in_maintenance, al):
@@ -363,36 +338,36 @@ def state_duration(al):
     return False
 
 
-def update_active_alerts(al, alhash):
-    if al.level != 'OK' and alhash in ACTIVE_ALERTS:
+def update_active_alerts(al):
+    alert_is_active = db.is_active(al)
+    if al.level != 'OK' and alert_is_active:
         LOGGER.debug("Updating active alert")
-        ACTIVE_ALERTS[alhash] = al
-    elif al.level != 'OK' and alhash not in ACTIVE_ALERTS:
+        db.activate_alert(al)
+    elif al.level != 'OK' and not alert_is_active:
         LOGGER.debug("Setting new active alert")
-        ACTIVE_ALERTS[alhash] = al
-    elif al.level == 'OK' and alhash in ACTIVE_ALERTS:
-        del ACTIVE_ALERTS[alhash]
-    if al.level != al.previouslevel:
-        update_statistics(alhash, al)
+        db.activate_alert(al)
+    elif al.level == 'OK' and alert_is_active:
+        db.deactivate_alert(al)
+        db.log_alert(al)
 
 
-def update_influxdb(al, alhash):
+def update_influxdb(al):
     if app.config['INFLUXDB_ENABLED'] is True:
         if al.level != al.previouslevel:
             LOGGER.debug("Updating InfluxDB")
-            update_db(influxify(al, alhash, "logs"))
+            update_db(influxify(al, al.alhash, "logs"))
             if al.level == 'OK':
                 delete_active(al)
             else:
-                update_db(influxify(al, alhash, "active", True))
+                update_db(influxify(al, al.alhash, "active", True))
         else:
-            update_db(influxify(al, alhash, "active", True))
+            update_db(influxify(al, al.alhash, "active", True))
 
 
 def update_db(data):
     LOGGER.debug("Running insert or update")
     try:
-        db.write_points([data])
+        influxdb.write_points([data])
     except InfluxDBClientError as err:
         LOGGER.error("Error(%s) - %s", err.code, err.content)
     except requests.ConnectionError as err:
@@ -402,7 +377,7 @@ def update_db(data):
 def delete_active(al):
     LOGGER.debug("Running delete series")
     try:
-        db.delete_series(measurement="active", tags={"hash": get_hash(al)})
+        influxdb.delete_series(measurement="active", tags={"hash": al.alhash})
     except InfluxDBClientError as err:
         LOGGER.error("Error(%s) - %s", err.code, err.content)
 
@@ -410,7 +385,7 @@ def delete_active(al):
 def remove_stale_alerts(aws_instances):
     LOGGER.debug("Checking for stale alerts from terminated instances")
     # Remove old stale alerts from terminated instances
-    for alhash, al in ACTIVE_ALERTS.items():
+    for al in db.get_active_alerts():
         x = [tag['value'] for tag in al.tags if tag['key'] == 'host']
         if not x:
             # Alert does not have host tag set, nothing to do
@@ -421,7 +396,7 @@ def remove_stale_alerts(aws_instances):
                 LOGGER.debug(
                     "Stale alert found, host not in aws instance list")
                 LOGGER.debug("Removing stale alert")
-                del ACTIVE_ALERTS[alhash]
+                db.deactivate_alert(al)
                 if app.config['INFLUXDB_ENABLED'] is True:
                     delete_active(al=al)
                 LOGGER.debug("Cleaning up existing Pagerduty or JIRA tickets")
@@ -472,147 +447,6 @@ def influxify(al, alhash, measurement, zero_time=False):
         json_body['tags'] = tags
 
     return json_body
-
-
-def update_statistics(alhash, al):
-    LOGGER.debug("Updating statistics")
-    if alhash in STATISTICS:
-        now = int(time.time())
-        stats = STATISTICS[alhash]
-        plevel = stats[al.previouslevel]
-        plevel["count"] += 1
-        plevel["duration"] = plevel["duration"] + ((
-            (now - stats['timestamp']) - plevel["duration"]) / plevel["count"])
-        stats[al.previouslevel] = plevel
-        stats['timestamp'] = now
-        STATISTICS[alhash] = stats
-    else:
-        if al.level != 'OK':
-            STATISTICS[alhash] = initialize_stats_counters(al)
-
-
-def initialize_stats_counters(al):
-    stats = {'id': al.id, 'timestamp': int(time.time()),
-             'OK': {'count': 0, 'duration': 0},
-             'INFO': {'count': 0, 'duration': 0},
-             'WARNING': {'count': 0, 'duration': 0},
-             'CRITICAL': {'count': 0, 'duration': 0}}
-    return stats
-
-
-def get_consecutive_count(alhash):
-    if alhash in ACTIVE_ALERTS:
-        existing = ACTIVE_ALERTS[alhash]
-        return existing.count + 1
-    return 1
-
-
-def get_sent_status(alhash):
-    if alhash in ACTIVE_ALERTS:
-        existing = ACTIVE_ALERTS[alhash]
-        return existing.sent
-    return False
-
-
-def get_pagerduty_incident_key(alhash):
-    if alhash in ACTIVE_ALERTS:
-        existing = ACTIVE_ALERTS[alhash]
-        if existing.pd_incident_key:
-            LOGGER.info("Found existing incident key")
-            return existing.pd_incident_key
-    return None
-
-
-def get_jira_issue(alhash):
-    if alhash in ACTIVE_ALERTS:
-        existing = ACTIVE_ALERTS[alhash]
-        if existing.jira_issue:
-            LOGGER.info("Found existing jira issue")
-            return existing.jira_issue
-    return None
-
-
-def activate_maintenance(key, val, duration):
-    LOGGER.debug('Setting maintenance')
-    duration_secs = {'m': 60, 'h': 3600, 'd': 86400, 'w': 604800}
-    start = int(time.time())
-    stop = int(start + (int(duration[:-1]) * duration_secs[duration[-1]]))
-    rule = {"key": key, "value": val, "start": start, "stop": stop}
-    filename = "maintenance_{}-{}.json".format(start, stop)
-    path = os.path.join(INSTALLDIR, "maintenance", filename)
-    rules = []
-    # If multiple schedules start and stop at the exact same time
-    # they will try to write to the same file, so reload file
-    # into a list of rules and append the the latest rule
-    if os.path.exists(path):
-        rules = load_json(path)
-    rules.append(rule)
-    write_json(path, rules)
-
-
-def deactive_maintenance(key, value, start, stop):
-    LOGGER.debug("Deactive maintenance")
-    rule = {"key": key, "value": value, "start": int(start), "stop": int(stop)}
-    filename = "maintenance_{}-{}.json".format(start, stop)
-    path = os.path.join(INSTALLDIR, "maintenance", filename)
-    rules = load_json(path)
-    if len(rules) == 1:
-        os.remove(path)
-    else:
-        LOGGER.debug("Found multiple rules in maintenance file")
-        for index, r in enumerate(rules):
-            if r == rule:
-                LOGGER.debug("Deleting rule %s", str(r))
-                del rules[index]
-                break
-        write_json(path, rules)
-
-
-def schedule_maintenance(key, val, duration, days, starttime, repeat):
-    r = True if repeat else False
-    filename = "schedule_{}.json".format(int(time.time()))
-    counter = {day: 0 for day in days}
-    schedule = {"key": key, "value": val, "duration": duration, "days": days,
-                "starttime": starttime, "repeat": r,
-                "runcounter": counter, "filename": filename}
-    write_json(os.path.join(
-        INSTALLDIR, "maintenance/schedule", filename), schedule)
-
-
-def load_schedule():
-    LOGGER.debug("Loading schedule")
-    schedule = []
-    msdir = os.path.join(INSTALLDIR, "maintenance/schedule")
-    msfiles = os.listdir(msdir)
-    for msf in msfiles:
-        m = re.match("schedule_([0-9]{10}).json", msf)
-        if m:
-            schedule.append(load_json(os.path.join(msdir, msf)))
-    return schedule
-
-
-def delete_schedule(filename):
-    LOGGER.debug("Delete schedule")
-    try:
-        os.remove(os.path.join(INSTALLDIR, "maintenance/schedule", filename))
-    except OSError:
-        LOGGER.error("Failed to delete schedule")
-
-
-def load_mrules():
-    LOGGER.debug("Loading maintenance")
-    mrules = []
-    mdir = os.path.join(INSTALLDIR, "maintenance")
-    mfiles = os.listdir(mdir)
-    for mf in mfiles:
-        m = re.match("maintenance_([0-9]{10})-([0-9]{10}).json", mf)
-        if m:
-            if int(m.group(1)) <= int(time.time()) <= int(m.group(2)):
-                mrules.extend(load_json(os.path.join(mdir, mf)))
-            else:
-                LOGGER.info("Deleting expired rule")
-                os.remove(os.path.join(mdir, mf))
-    return mrules
 
 
 def affected_by_mrules(mrules, al):
@@ -729,53 +563,3 @@ def datestr_to_timestamp(datestr):
         return datetime.timestamp(
             datetime.strptime(m.group(0), '%Y-%m-%dT%H:%M:%S'))
     return None
-
-
-def get_hash(al):
-    alhash = hashlib.sha256(al.id.encode()).hexdigest()
-    LOGGER.debug('Alert hash: %s', alhash)
-    return alhash
-
-
-def write_json(path, content):
-    try:
-        with open(path, 'w') as f:
-            f.write(json.dumps(content) + "\n")
-    except OSError:
-        LOGGER.error("Failed writing %s", path)
-
-
-def load_json(path):
-    try:
-        with open(path, 'r') as f:
-            return json.loads(f.read())
-    except OSError:
-        LOGGER.error("Failed reading %s", path)
-
-
-@atexit.register
-def dump_active_alerts(*args):
-    dump = {}
-    for k, v in ACTIVE_ALERTS.items():
-        dump[k] = v.__dict__
-    write_json(ACTIVE_ALERTS_FILE, dump)
-    LOGGER.debug(str(args))
-
-
-def load_active_alerts():
-    dump = {}
-    if os.path.exists(ACTIVE_ALERTS_FILE):
-        dump = load_json(ACTIVE_ALERTS_FILE)
-    if dump:
-        for k, v in dump.items():
-            al = Alert(v['id'], v['duration'], v['message'], v['level'],
-                       v['previouslevel'], v['time'], v['tags'])
-            al.count = v['count']
-            al.pd_incident_key = v['pd_incident_key']
-            al.jira_issue = v['jira_issue']
-            al.grafana_url = v['grafana_url']
-            ACTIVE_ALERTS[k] = al
-
-
-load_active_alerts()
-signal.signal(signal.SIGTERM, dump_active_alerts)

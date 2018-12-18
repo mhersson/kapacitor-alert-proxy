@@ -22,24 +22,19 @@ class Config(object):
     AWS_API_ENABLED = False
     AWS_REGION = "eu-west-1"
 
-    # Tag used in most or all of kapacitor queries as .groupBy()
-    # I use 'Environment' to split between test, staging and produciton
-    # host would normally be a sane default if using Telegraf
-    MAIN_GROUP_TAG = 'Environment'
-
     # Maintenance tags (value, displayed text)
     MAINTENANCE_TAGS = [('Environment', 'Environment'),
                         ('host', 'Host'),
                         ('id', 'Id')]   # This is the alert id
 
-    # With flapping detection enabled KAP will not forward alerts to targets
-    # unless it receives the number of consecutive alerts defined by the
-    # FLAPPING_DETECTION_COUNT setting
-    # If both FLAPPING_DETECTION and STATE_DURATION is active STATE_DURATION
-    # will kick in after the consecutive count has been reach and could
-    # further delay the alert
-    FLAPPING_DETECTION_ENABLED = False
-    FLAPPING_DETECTION_COUNT = 2
+    # With flapping detection enabled KAP tries to detect if an alert is
+    # flapping and the hold back the alerts, and instead
+    # let you know the alert is flapping to reduce the number of messages sent
+    FLAPPING_DETECTION_ENABLED = True
+    # Number of seconds to hold back an alert before dispatching to targets
+    # This is a global setting and affects all alerts. To hold back individual
+    # alerts use STATE_DURATION
+    ALERTING_DELAY = 300
     # Delay forwarding alerts until they have been in
     # alerting state for the given number of seconds
     # {"match string", delay secs} - match string must be part of the alert id

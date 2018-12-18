@@ -6,42 +6,30 @@
         <h4>No statistics to show</h4>
     </div>
     {% else %}
-    <p style="text-align: right">Statistics collected since {{ startup_time | ctime }}</p>
+    <p style="text-align: right">Statistics for the last 24 hours</p>
     <table style="font-size: 14px" class="table table-sm table-bordered">
         <thead class="thead-dark">
             <tr class="table-danger">
                 <th>Id</th>
-                <th>Count</th>
+                <th>Environment</th>
                 <th>Average Duration</th>
+                <th>Count</th>
             </tr>
         </thead>
         <tbody>
-            {% for a in stats.values() | sort(reverse=True, attribute='CRITICAL.count') %}
-            {% if a.CRITICAL.count != 0 %}
-            <tr class="table-danger">
-                <td>{{ a.id }}</td>
-                <td class="text-right">{{ a.CRITICAL.count }}</td>
-                <td class="text-right">{{ a.CRITICAL.duration | timedelta }}</td>
+            {% for a in stats %}
+	    {% if a[1] == 'CRITICAL' %}
+	    <tr class="table-danger">
+	    {% elif a[1] == 'WARNING' %}
+	    <tr class="table-warning">
+	    {% elif a[1] == 'INFO' %}
+	    <tr class="table-info">
+	    {% endif %}
+                <td>{{ a[0] }}</td>
+                <td>{{ a[2] }}</td>
+                <td class="text-right">{{ a[3] | timedelta }}</td>
+                <td class="text-right">{{ a[4] }}</td>
             </tr>
-            {% endif %}
-            {% endfor %}
-            {% for a in stats.values() | sort(reverse=True, attribute='WARNING.count') %}
-            {% if a.WARNING.count != 0 %}
-            <tr class="table-warning">
-                <td>{{ a.id }}</td>
-                <td class="text-right">{{ a.WARNING.count }}</td>
-                <td class="text-right">{{ a.WARNING.duration | timedelta }}</td>
-            </tr>
-            {% endif %}
-            {% endfor %}
-            {% for a in stats.values() | sort(reverse=True, attribute='INFO.count') %}
-            {% if a.INFO.count != 0 %}
-            <tr class="table-info">
-                <td>{{ a.id }}</td>
-                <td class="text-right">{{ a.INFO.count }}</td>
-                <td class="text-right">{{ a.INFO.duration | timedelta }}</td>
-            </tr>
-            {% endif %}
             {% endfor %}
         </tbody>
     </table>
