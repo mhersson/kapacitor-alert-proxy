@@ -13,9 +13,9 @@ from jira.exceptions import JIRAError
 from app import LOGGER
 
 
-class Incident(object):
+class Incident():
     def __init__(self, server, username, password, project_key, assignee):
-        LOGGER.debug("Initiating jira incident")
+        LOGGER.info("Initiating jira incident")
         self._server = server
         self._username = username
         self._password = password
@@ -23,7 +23,7 @@ class Incident(object):
         self._assignee = assignee
 
     def _connect(self):
-        LOGGER.debug("Connecting to JIRA")
+        LOGGER.info("Connecting to JIRA")
         try:
             conn = JIRA(options={'server': self._server},
                         basic_auth=(self._username, self._password))
@@ -60,7 +60,7 @@ class Incident(object):
     @staticmethod
     def _get_transistion_id(jira, issue, name):
         try:
-            LOGGER.debug("Getting available transistions")
+            LOGGER.info("Getting available transistions")
             transitions = jira.transitions(issue)
             t = [t['id'] for t in transitions if t['name'] == name]
             if t:
@@ -71,22 +71,22 @@ class Incident(object):
 
     def _resolve(self, jira, issue):
         try:
-            LOGGER.debug("Resolving JIRA ticket")
+            LOGGER.info("Resolving JIRA ticket")
             t = self._get_transistion_id(jira, issue, 'Resolve Issue')
             if t:
                 jira.transition_issue(issue, t)
-                LOGGER.info("JIRA ticket resolved")
+                LOGGER.debug("JIRA ticket resolved")
         except JIRAError as err:
             LOGGER.error("Failed resolving JIRA ticket")
             LOGGER.error(err)
 
     def _close(self, jira, issue):
         try:
-            LOGGER.debug("Closing JIRA ticket")
+            LOGGER.info("Closing JIRA ticket")
             t = self._get_transistion_id(jira, issue, 'Close Issue')
             if t and len(issue.fields.comment.comments) <= 0:
                 jira.transition_issue(issue, t)
-                LOGGER.info("JIRA ticket closed")
+                LOGGER.debug("JIRA ticket closed")
         except JIRAError as err:
             LOGGER.error("Failed closing JIRA ticket")
             LOGGER.error(err)
@@ -102,9 +102,8 @@ class Incident(object):
             self._close(jira, issue)
 
     def post(self, alert):
-        if alert.level != alert.previouslevel:
-            if alert.level == 'CRITICAL' and alert.jira_issue is None:
-                alert.jira_issue = self._create(alert)
-            elif alert.level != 'CRITICAL' and alert.jira_issue is not None:
-                self._resolve_and_close(key=alert.jira_issue)
+        if alert.level == 'CRITICAL' and alert.jira_issue is None:
+            alert.jira_issue = self._create(alert)
+        elif alert.level != 'CRITICAL' and alert.jira_issue is not None:
+            self._resolve_and_close(key=alert.jira_issue)
         return alert.jira_issue

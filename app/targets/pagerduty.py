@@ -12,15 +12,14 @@ import requests
 from app import LOGGER
 
 
-class Pagerduty(object):
-    def __init__(self, url, service_key, state_change_only):
-        LOGGER.debug("Initiating pagerduty")
+class Pagerduty():
+    def __init__(self, url, service_key):
+        LOGGER.info("Initiating pagerduty")
         self._url = url
         self._service_key = service_key
-        self._state_change_only = state_change_only
 
     def _create_event(self, alert, event_type="trigger"):
-        LOGGER.debug("Creating event")
+        LOGGER.info("Creating pagerduty event")
 
         if event_type == "trigger":
             LOGGER.debug("Type trigger event")
@@ -44,21 +43,18 @@ class Pagerduty(object):
         return pd_json
 
     def post(self, alert):
-        if self._state_change_only and alert.level == alert.previouslevel:
-            LOGGER.debug("No state change")
+        if alert.level == 'CRITICAL':
+            message = self._create_event(alert)
+        elif (alert.level != 'CRITICAL' and
+              alert.pd_incident_key is not None):
+            message = self._create_event(alert, event_type="resolve")
         else:
-            if alert.level == 'CRITICAL':
-                message = self._create_event(alert)
-            elif (alert.level != 'CRITICAL' and
-                  alert.pd_incident_key is not None):
-                message = self._create_event(alert, event_type="resolve")
-            else:
-                LOGGER.info("None critical event")
-                return alert.pd_incident_key
-            LOGGER.info("Sending event")
-            res = requests.post(self._url, json=message)
-            if res:
-                LOGGER.info("Response from server: %d %s",
-                            res.status_code, res.content.decode())
-                return json.loads(res.content.decode()).get('incident_key')
+            LOGGER.info("None critical event")
+            return alert.pd_incident_key
+        LOGGER.info("Sending event")
+        res = requests.post(self._url, json=message)
+        LOGGER.debug("Status code: %d, Content: %s",
+                     res.status_code, res.content.decode())
+        if res:
+            return json.loads(res.content.decode()).get('incident_key')
         return alert.pd_incident_key

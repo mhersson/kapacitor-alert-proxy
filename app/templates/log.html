@@ -1,0 +1,52 @@
+{% extends "base.html" %} {% block main %}
+<div style="margin-top: 50px">
+
+    {% if not records %}
+    <div style="text-align: center" class="alert alert-success" role="alert">
+        <h4>No records to show</h4>
+    </div>
+    {% else %}
+    <table style="font-size: 14px" class="table table-sm table-bordered">
+        <thead class="thead-dark">
+            <tr class="table-danger">
+                <th>Time</th>
+                <th>Alert id</th>
+                <th>Previous level</th>
+                <th>Level</th>
+                <th>Environment</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in records %}
+	    {% if a[3] == 'CRITICAL' %}
+	    <tr class="table-danger">
+	    {% elif a[3] == 'WARNING' %}
+	    <tr class="table-warning">
+	    {% elif a[3] == 'INFO' %}
+	    <tr class="table-info">
+	    {% elif a[3] == 'OK' %}
+	    <tr class="table-success">
+	    {% endif %}
+                <td>{{ a[0] | ctime }}</td>
+                <td>{{ a[1] }}</td>
+                <td>{{ a[2] }}</td>
+                <td>{{ a[3] }}</td>
+                <td>{{ a[4] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="text-align: right">
+        <small>All displayed times are local to the server ({{ tzname }}).</small>
+    <div>
+
+    {% endif %}
+</div>
+
+<script type="text/javascript">
+    setInterval(function() {
+        if (!document.hidden) {
+            window.location.reload();
+        }
+    }, 30000);
+</script>{% endblock %}

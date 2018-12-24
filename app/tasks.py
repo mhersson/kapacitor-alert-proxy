@@ -11,9 +11,10 @@ import calendar
 import datetime
 import requests
 
-from app import app, routes, LOGGER
-from app.dbcontroller import DBController
+from app import app, LOGGER
 from app.alert import Alert
+from app.alertcontroller import AlertController
+from app.dbcontroller import DBController
 
 
 class FlapDetective():
@@ -21,12 +22,13 @@ class FlapDetective():
 
     def __init__(self):
         super(FlapDetective, self).__init__()
-        LOGGER.debug("Initiating flap detective")
+        LOGGER.info("Initiating flap detective")
+        self.alertctrl = AlertController()
         self.db = DBController()
         self.limit = 3
 
     def run(self):
-        LOGGER.debug("Searching for flapping alerts")
+        LOGGER.info("Searching for flapping alerts")
         logged_alerts = self.db.get_log_count()
         flapping_alerts = self.db.get_flapping_alerts()
         flaphash = [x[0] for x in flapping_alerts]
@@ -51,8 +53,7 @@ class FlapDetective():
                   if x[0] not in logged_hash]:
             self.db.unset_flapping(a[0], a[1])
 
-    @staticmethod
-    def notify(alertid, flapping=True, reminder=False):
+    def notify(self, alertid, flapping=True, reminder=False):
         if app.config['SLACK_ENABLED']:
             if flapping:
                 a = Alert(alertid, 0, "Flapping detected: " + alertid,
@@ -62,26 +63,28 @@ class FlapDetective():
             else:
                 a = Alert(alertid, 0, "Flapping resolved: " + alertid,
                           'OK', 'CRITICAL', None, None)
-            routes.slack.post(a)
+            self.alertctrl.slack.post(a)
 
 
 class KAOS():
     def __init__(self):
-        LOGGER.debug("Initiating KAOS scheduler")
+        LOGGER.info("Initiating KAOS scheduler")
         self.db = DBController()
+        self.alertctrl = AlertController()
 
     def run(self):
         kaos_report = {app.config['KAOS_CUSTOMER']: []}
         mrules = self.db.get_active_maintenance_rules()
         for v in self.db.get_active_alerts():
             if (app.config['KAOS_IGNORE_MAINTENANCE'] or
-                    not routes.affected_by_mrules(mrules, v)):
-                if routes.contains_excluded_tags(
+                    not self.alertctrl.affected_by_mrules(mrules, v)):
+                if self.alertctrl.contains_excluded_tags(
                         app.config['KAOS_EXCLUDED_TAGS'], v.tags):
                     continue
                 # Create a copy we can play with
                 al_dict = dict(v.__dict__)
-                al_dict['message'] = routes.truncate_string(al_dict['message'])
+                al_dict['message'] = self.truncate_string(
+                    al_dict['message'])
                 al_dict['time'] = self._fixtimezone(al_dict['time'])
                 # GO-lint complains about underscores in variables
                 # and there is no way do selectivly disable it,
@@ -95,7 +98,7 @@ class KAOS():
 
     @staticmethod
     def _send_report(kaos_report):
-        LOGGER.debug("Sending KAOS report")
+        LOGGER.info("Sending KAOS report")
         try:
             requests.post(app.config['KAOS_URL'],
                           verify=app.config['KAOS_CERT'],
@@ -109,19 +112,25 @@ class KAOS():
             time.localtime()) - calendar.timegm(time.gmtime())
         return s + tzdiff
 
+    @staticmethod
+    def truncate_string(s):
+        if len(s) > 200:
+            return s[:197] + "..."
+        return s
+
 
 class MaintenanceScheduler():
     def __init__(self):
-        LOGGER.debug("Initiating maintenance scheduler")
+        LOGGER.info("Initiating maintenance scheduler")
         self.db = DBController()
 
     def run(self):
         now = datetime.datetime.today()
-        LOGGER.debug("Checking maintenance schedule")
+        LOGGER.info("Checking maintenance schedule")
         for schedule in self.db.get_maintenance_schedule():
             if (self._check_day(now, schedule['days'])
                     and self._check_starttime(now, schedule['starttime'])):
-                LOGGER.debug("Activating scheduled maintenance")
+                LOGGER.info("Activating scheduled maintenance")
                 self.db.activate_maintenance(
                     schedule['key'], schedule['value'], schedule['duration'])
                 self.db.update_day_runcounter(

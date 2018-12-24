@@ -1,4 +1,4 @@
-# pylint: disable=C0413
+# pylint: disable=C0413,R0904
 # vim:set shiftwidth=4 softtabstop=4 expandtab:
 '''
 Module: dbcontroller.py
@@ -24,7 +24,7 @@ class DBController():
         self.db = os.path.join(INSTALLDIR, 'db/kap.db')
 
     def create_tables(self):
-        LOGGER.debug("Creating database tables")
+        LOGGER.info("Creating database tables")
         con = sqlite3.connect(self.db)
         with con:
             cur = con.cursor()
@@ -45,11 +45,14 @@ class DBController():
                 return res
         return None
 
-    def execute_query(self, query):
+    def execute_query(self, query, values=None):
         con = sqlite3.connect(self.db)
         with con:
             cur = con.cursor()
-            cur.execute(query)
+            if values:
+                cur.execute(query, values)
+            else:
+                cur.execute(query)
             return cur.rowcount
 
     def execute_many(self, query, values):
@@ -60,37 +63,47 @@ class DBController():
             return cur.rowcount
 
     def get_tickets_and_keys(self, al):
-        LOGGER.debug("Add tickets and keys")
-        query = "select pagerduty, jira, grafana, " + \
-            "state_duration, sent " + \
+        LOGGER.info("Add tickets and keys")
+        query = "select pagerduty, jira, grafana, sent " + \
             "from active_alerts where hash = '{}'".format(al.alhash)
         res = self.select(query, use_column_name=True)
         if res:
             al.pd_incident_key = res['pagerduty']
             al.jira_issue = res['jira']
             al.grafana_url = res['grafana']
-            al.state_duration = bool(res['state_duration'])
             al.sent = bool(res['sent'])
         return al
 
     def activate_alert(self, al):
-        LOGGER.debug("Set alert active")
-        query = ("REPLACE INTO active_alerts (hash, time, id, message,"
+        LOGGER.info("Activate alert")
+        query = ("INSERT INTO active_alerts (hash, time, id, message,"
                  "previouslevel, level, duration, pagerduty, jira, grafana, "
-                 "state_duration, sent) VALUES('{}', {}, '{}', '{}', "
-                 "'{}', '{}', {}, '{}', '{}', '{}', {}, {})").format(
-                     al.alhash, al.time, al.id, al.message,
-                     al.previouslevel, al.level, al.duration,
-                     al.pd_incident_key, al.jira_issue, al.grafana_url,
-                     al.state_duration, al.sent)
-        self.execute_query(query)
+                 "state_duration, sent) VALUES(?, ?, ?, ?, ?, ?, ? ,? , "
+                 "?, ?, ?, ?)")
+        values = (al.alhash, al.time, al.id, al.message,
+                  al.previouslevel, al.level, al.duration,
+                  al.pd_incident_key, al.jira_issue, al.grafana_url,
+                  al.state_duration, al.sent)
+        self.execute_query(query, values)
         query = "INSERT OR IGNORE INTO active_alert_tags " + \
             "(hash, key, value) VALUES (?, ?, ?)"
         tags = [(al.alhash, x['key'], x['value']) for x in al.tags]
         self.execute_many(query, tags)
 
+    def update_alert(self, al):
+        LOGGER.info("Update alert")
+        query = ("UPDATE active_alerts set time = ? ,message = ?, "
+                 "previouslevel = ?, level = ?, duration = ?,"
+                 "pagerduty = ?, jira = ?, grafana = ?, state_duration = ?,"
+                 "sent = ? where hash = ?")
+        values = (al.time, al.message,
+                  al.previouslevel, al.level, al.duration,
+                  al.pd_incident_key, al.jira_issue, al.grafana_url,
+                  al.state_duration, al.sent, al.alhash)
+        self.execute_query(query, values)
+
     def deactivate_alert(self, al):
-        LOGGER.debug("Deactivate alert")
+        LOGGER.info("Deactivate alert")
         query = "DELETE FROM active_alerts where hash = '{}'".format(al.alhash)
         self.execute_query(query)
 
@@ -103,7 +116,7 @@ class DBController():
         return False
 
     def state_duration(self, al):
-        LOGGER.debug("Checking state duration")
+        LOGGER.info("Checking state duration")
         query = "SELECT state_duration FROM active_alerts " + \
             "where hash = '{}'".format(al.alhash)
         res = self.select(query)
@@ -112,12 +125,12 @@ class DBController():
         return False
 
     def get_active_alerts(self):
-        LOGGER.debug("Get active alerts")
+        LOGGER.info("Get active alerts")
         query = "select id, duration, message, level, previouslevel, " + \
             "time, grafana, jira, pagerduty from active_alerts"
         result = self.select(query, fetchone=False)
+        res = []
         if result:
-            res = []
             for r in result:
                 a = Alert(r[0], r[1], r[2], r[3], r[4], r[5], None)
                 a.grafana_url = r[6]
@@ -125,8 +138,7 @@ class DBController():
                 a.pd_incident_key = r[8]
                 a.tags = self.get_tags(a.alhash)
                 res.append(a)
-            return res
-        return None
+        return res
 
     def get_tags(self, alhash):
         query = "select key, value from active_alert_tags where " + \
@@ -139,6 +151,7 @@ class DBController():
         return tags
 
     def log_alert(self, al):
+        LOGGER.info("Logging alert")
         envir = None
         host = None
         for tag in al.tags:
@@ -146,20 +159,20 @@ class DBController():
                 envir = tag['value']
             if tag['key'] == 'host':
                 host = tag['value']
-        query = ("INSERT INTO alert_log(hash, time, id, message, "
-                 "level, environment, host, duration, "
-                 "pagerduty, jira) VALUES('{}', {}, '{}', '{}',"
-                 "'{}', '{}', '{}', {}, '{}', '{}')".format(
-                     al.alhash, al.time, al.id, al.message, al.previouslevel,
-                     envir, host, al.duration, al.pd_incident_key,
-                     al.jira_issue))
-        self.execute_query(query)
+        query = ("INSERT OR IGNORE INTO alert_log(hash, time, id, "
+                 "message, previouslevel, level, environment, host, duration, "
+                 "pagerduty, jira) VALUES( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        values = (al.alhash, al.time, al.id, al.message, al.previouslevel,
+                  al.level, envir, host, al.duration, al.pd_incident_key,
+                  al.jira_issue)
+        self.execute_query(query, values)
 
     def get_log_count(self):
-        # LOGGER.debug("Getting alert occurences from alert log")
+        # LOGGER.info("Getting alert occurences from alert log")
         now = int(time.time())
         query = "select hash, id, count(*) from alert_log " + \
-            "where time >= {} group by hash, id".format(now - (20 * 60))
+            "where time >= {} and level = 'OK' group by hash, id".format(
+                now - (30 * 60))
         result = self.select(query, fetchone=False)
         if result:
             return result
@@ -167,9 +180,18 @@ class DBController():
 
     def get_24hours_stats(self):
         tm = int(time.time() - 24 * 3600)
-        query = "select id, level, environment, avg(duration), count(*) " + \
-            "from alert_log where " + \
+        query = "select id, previouslevel, environment, avg(duration), " + \
+            "count(*) from alert_log where level = 'OK' and " + \
             "time >= {} group by id, level, environment".format(tm)
+        result = self.select(query, fetchone=False)
+        if result:
+            return result
+        return []
+
+    def get_6hour_log(self):
+        tm = int(time.time() - 6 * 3600)
+        query = "select time, id, previouslevel, level, environment " + \
+            " from alert_log where time >= {} order by time desc".format(tm)
         result = self.select(query, fetchone=False)
         if result:
             return result
@@ -184,7 +206,7 @@ class DBController():
         return False
 
     def get_flapping_alerts(self):
-        # LOGGER.debug("Get all alerts marked as flapping")
+        # LOGGER.info("Get all alerts marked as flapping")
         query = "select hash, id, time from flapping_alerts"
         result = self.select(query, fetchone=False)
         if result:
@@ -192,30 +214,31 @@ class DBController():
         return []
 
     def set_flapping(self, alhash, alid):
-        LOGGER.debug("Setting flapping on %s", alid)
+        LOGGER.info("Setting flapping on %s", alid)
         now = int(time.time())
         query = "INSERT INTO flapping_alerts (hash, id, time) " + \
-            "VALUES ('{}', '{}', {})".format(alhash, alid, now)
-        self.execute_query(query)
+            "VALUES (?, ?, ?)"
+        values = (alhash, alid, now)
+        self.execute_query(query, values)
 
     def unset_flapping(self, alhash, alid):
-        LOGGER.debug("Unsetting flapping on %s", alid)
+        LOGGER.info("Unsetting flapping on %s", alid)
         query = "DELETE FROM flapping_alerts where hash = '{}'".format(alhash)
         self.execute_query(query)
 
     def activate_maintenance(self, key, value, duration):
-        LOGGER.debug("Activate maintenance on %s %s for %s",
-                     key, value, duration)
+        LOGGER.info("Activate maintenance on %s %s for %s",
+                    key, value, duration)
         duration_secs = {'m': 60, 'h': 3600, 'd': 86400, 'w': 604800}
         start = int(time.time())
         stop = int(start + (int(duration[:-1]) * duration_secs[duration[-1]]))
-        query = ("INSERT  INTO active_maintenance (start, stop, key, value) "
-                 "VALUES ({start}, {stop}, '{key}', '{value}')".format(
-                     start=start, stop=stop, key=key, value=value))
-        self.execute_query(query)
+        query = "INSERT  INTO active_maintenance " + \
+            "(start, stop, key, value) VALUES (?, ?, ?, ?)"
+        values = (start, stop, key, value)
+        self.execute_query(query, values)
 
     def deactive_maintenance(self, start, stop, key, value):
-        LOGGER.debug("Deactivate maintenance on %s %s", key, value)
+        LOGGER.info("Deactivate maintenance on %s %s", key, value)
         query = ("DELETE FROM active_maintenance where "
                  "start = {start} and stop = {stop} and key = '{key}' "
                  "and value = '{value}'".format(
@@ -223,7 +246,7 @@ class DBController():
         self.execute_query(query)
 
     def get_active_maintenance_rules(self):
-        # LOGGER.debug("Get maintenance rules")
+        # LOGGER.info("Get maintenance rules")
         mrules = []
         query = "select start, stop, key, value from active_maintenance"
         result = self.select(query, fetchone=False)
@@ -243,14 +266,14 @@ class DBController():
 
     def add_maintenance_schedule(self, starttime, duration,
                                  key, value, repeat, days):
-        LOGGER.debug("Add maintenance schedule for %s %s", key, value)
+        LOGGER.info("Add maintenance schedule for %s %s", key, value)
         schedule_id = time.time_ns()  # Create and id from time_ns
         days = [(schedule_id, day, 0) for day in days]
         query = ("INSERT INTO maintenance_schedule (schedule_id, "
                  "starttime, duration, key, value, repeat) VALUES ("
-                 "{}, '{}', '{}', '{}', '{}', {})").format(
-                     schedule_id, starttime, duration, key, value, repeat)
-        if self.execute_query(query):
+                 "?, ?, ?, ?, ?, ?)")
+        values = (schedule_id, starttime, duration, key, value, repeat)
+        if self.execute_query(query, values):
             query = ("INSERT INTO maintenance_schedule_days "
                      "(schedule_id, day, runcounter) VALUES (?, ?, ?)")
             self.execute_many(query, days)
@@ -287,11 +310,12 @@ class DBController():
     def update_day_runcounter(self, schedule_id, day):
         query = "update maintenance_schedule_days " + \
             "set runcounter = runcounter + 1 " + \
-            "where schedule_id = {} and day = {}".format(schedule_id, day)
-        self.execute_query(query)
+            "where schedule_id = ? and day = ?"
+        values = (schedule_id, day)
+        self.execute_query(query, values)
 
     def delete_maintenance_schedule(self, schedule_id):
-        LOGGER.debug("Deleting maintenance schedule")
+        LOGGER.info("Deleting maintenance schedule")
         query = "DELETE FROM maintenance_schedule " + \
             "WHERE schedule_id = %d" % schedule_id
         self.execute_query(query)
@@ -299,9 +323,9 @@ class DBController():
 
 CREATE_TABLES_SQL = '''
 
-DROP TABLE IF EXISTS active_alerts;
-DROP TABLE IF EXISTS active_alert_tags;
-DROP TRIGGER IF EXISTS delete_active_alert_tags;
+-- DROP TABLE IF EXISTS active_alerts;
+-- DROP TABLE IF EXISTS active_alert_tags;
+-- DROP TRIGGER IF EXISTS delete_active_alert_tags;
 
 CREATE TABLE IF NOT EXISTS active_alerts(hash TEXT PRIMARY KEY,
 time INTEGER, id TEXT, message TEXT, previouslevel TEXT,
@@ -328,8 +352,9 @@ CREATE TABLE IF NOT EXISTS maintenance_schedule_days
 FOREIGN KEY (schedule_id) REFERENCES maintenance_schedule(schedule_id));
 
 CREATE TABLE IF NOT EXISTS alert_log(hash TEXT, time INTEGER, id TEXT,
-message TEXT, environment TEXT, host TEXT, level TEXT,
-duration INTEGER, pagerduty TEXT, jira TEXT);
+message TEXT, environment TEXT, host TEXT, previouslevel TEXT, level TEXT,
+duration INTEGER, pagerduty TEXT, jira TEXT,
+UNIQUE (hash, time));
 
 CREATE TRIGGER IF NOT EXISTS delete_active_alert_tags
 AFTER DELETE on active_alerts
