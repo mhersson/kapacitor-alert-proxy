@@ -7,7 +7,8 @@ def run(args):
     duration = int(args.duration) * 1000**3
 
     json_body = {"id": args.hostname + " " + args.test,
-                 "message": "This is a generated test message, please ignore",
+                 "message": args.hostname + " " + args.test +
+                 " - This is a generated test message, please ignore",
                  "duration": duration,
                  "level": args.level.upper(),
                  "previousLevel": args.plevel.upper(),
