@@ -1,17 +1,18 @@
 
 {% if mrules | length > 0 %}
-<div style="margin-top: 20px; text-align: left">
-    <h4>Active:</h4>
+<div style="margin-top: 50px; text-align: left">
+    <h4 style="color: #d0d0d0">Active:</h4>
 <div>
 <div>
-    <table class="table table-sm table-bordered table-striped">
+    <table class="table table-sm table-bordered table-dark">
         <thead class="thead-dark">
             <tr>
                 <th>Tag</th>
                 <th>Value</th>
                 <th>Start</th>
                 <th>Stop</th>
-                <th>Delete</th>
+                <th class="text-center">Comment</th>
+                <th class="text-center">Delete</th>
             </tr>
         </thead>
         <tbody>
@@ -21,14 +22,28 @@
                 <td>{{ rule.value }}</td>
                 <td>{{ rule.start | ctime }}</td>
                 <td>{{ rule.stop  | ctime}}</td>
-                <td style="text-align: center">
+		{% if rule.comment %}
+                <td class="text-center">
+		  <button type="button" id="btn-popover" class="btn btn-block btn-info"
+			  data-container="body" data-toggle="popover"
+			  data-placement="top" data-content="{{ rule.comment }}">
+		    <span class="far fa-comment-alt"></span>
+		  </button>
+		  
+		</td>
+		{% else %}
+		<td></td>
+		{% endif %}
+                <td class="text-center">
                     <form action="" method="POST">
                         {{ df.csrf_token }}
                         {{ df.key(value=rule.key) }}
                         {{ df.value(value=rule.value) }}
                         {{ df.start(value=rule.start) }}
                         {{ df.stop(value=rule.stop) }}
-                        {{ df.submit(class="btn btn-sm btn-danger") }}
+			<button type="submit" class="btn btn-block btn-danger">
+			  <i class="far fa-trash-alt"></i>
+			</button>
                     </form>
                 </td>
                 {% endfor %}

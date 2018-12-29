@@ -1,10 +1,10 @@
 {% if schedule | length > 0 %}
 {% set weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] %}
-<div style="margin-top: 20px; text-align: left">
-    <h4>Scheduled:</h4>
+<div style="margin-top: 50px; text-align: left">
+    <h4 style="color: #d0d0d0">Scheduled:</h4>
 <div>
 <div>
-    <table class="table table-sm table-bordered table-striped">
+    <table class="table table-sm table-bordered table-dark">
         <thead class="thead-dark">
             <tr>
                 <th>Tag</th>
@@ -12,8 +12,9 @@
                 <th>Days</th>
                 <th>StartTime</th>
                 <th>Duration</th>
-                <th>Repeat</th>
-                <th>Delete</th>
+                <th class="text-center">Repeat</th>
+                <th class="text-center">Comment</th>
+                <th class="text-center">Delete</th>
             </tr>
         </thead>
         <tbody>
@@ -28,12 +29,29 @@
                 </td>
                 <td>{{ sched.starttime }}</td>
                 <td>{{ sched.duration }}</td>
-                <td>{{ sched.repeat }}</td>
-                <td style="text-align: center">
+		{% if sched.repeat %}
+                <td class="text-center"><i class="fas fa-check"></i></td>
+		{% else %}
+                <td class="text-center"><i class="fas fa-minus"></i></td>
+		{% endif %}
+		{% if sched.comment %}
+                <td class="text-center">
+		  <button type="button" class="btn btn-block btn-info"
+			  data-container="body" data-toggle="popover"
+			  data-placement="top" data-content="{{ sched.comment }}">
+		    <span class="far fa-comment-alt"></span>
+		  </button>
+		</td>
+		{% else %}
+                <td></td>
+		{% endif %}
+                <td class="text-center">
                     <form action="" method="POST">
                         {{ dsf.csrf_token }}
                         {{ dsf.schedule_id(value=sched.schedule_id) }}
-                        {{ dsf.submit(class="btn btn-sm btn-danger") }}
+			<button type="submit" class="btn btn-block btn-danger">
+			  <i class="far fa-trash-alt"></i>
+			</button>
                     </form>
                 </td>
                 {% endfor %}

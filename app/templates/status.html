@@ -1,11 +1,15 @@
 {% extends "base.html" %} {% block main %}
-<div style="margin-top: 50px">
+<div style="margin-top: 30px">
 
   <div style="height: 50px; text-align: center;">
-    <div class="h-50 d-inline-block alert-primary" style="width: 130px">MAINTENANCE</div>
-    <div class="h-50 d-inline-block alert-info" style="width: 130px">INFO</div>
-    <div class="h-50 d-inline-block alert-warning" style="width: 130px">WARNING</div>
-    <div class="h-50 d-inline-block alert-danger" style="width: 130px">CRITICAL</div>
+    <div class="h-50 d-inline-block alert-primary" style="width: 155px">MAINTENANCE
+      <span class="fas fa-bell-slash"></span></div>
+    <div class="h-50 d-inline-block alert-info" style="width: 155px">INFO
+      <span class="fas fa-info"></span></div>
+    <div class="h-50 d-inline-block alert-warning" style="width: 155px">WARNING
+      <span class="fas fa-exclamation-triangle"></span></div>
+    <div class="h-50 d-inline-block alert-danger" style="width: 155px">CRITICAL
+      <span class="fas fa-skull-crossbones"></span></div>
   </div>
     {% if not alerts %}
     <div style="text-align: center" class="alert alert-success" role="alert">
@@ -19,7 +23,8 @@
                 <th>Alert message</th>
                 <th>Environment</th>
                 <th>Duration</th>
-                <th>Level</th>
+                <th class="text-center">Level</th>
+                <th class="text-center">Mute</th>
             </tr>
         </thead>
         <tbody>
@@ -50,12 +55,26 @@
 	        <td>-</td>
 	        {% endif %}
                 <td class="text-right">{{ a.duration | timedelta }}</td>
-                <td>{{ a.level }}</td>
+                <td class="text-center">{{ a.level | fontawesome | safe}}</td>
+		{% if a in maintenance %}
+		<td></td>
+		{% else %}
+	        <td class="text-center">
+                    <form action="" method="POST">
+                        {{ qm.csrf_token }}
+                        {{ qm.alert_id(value=a.id) }}
+			<button type="submit" class="btn btn-sm btn-block"
+				style="font-size: 8px">
+			  <i class="far fa-bell-slash"></i>
+			</button>
+                    </form>
+		</td>
+		{% endif %}
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    <div style="text-align: right">
+    <div style="color: #d0d0d0; text-align: right">
         <small>All displayed times are local to the server ({{ tzname }}).</small>
     <div>
     {% endif %}

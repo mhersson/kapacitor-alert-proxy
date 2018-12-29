@@ -13,6 +13,7 @@ from datetime import timedelta
 from flask import Response, request, render_template, redirect
 from app import app, LOGGER, TZNAME
 from app.forms.maintenance import ActivateForm, DeactivateForm, DeleteSchedule
+from app.forms.maintenance import QuickActivate
 from app.alertcontroller import AlertController
 from app.dbcontroller import DBController
 
@@ -27,7 +28,11 @@ def alert():
     al = alertcontroller.create_alert(request.json)
     if al is not None:
         al = db.get_tickets_and_keys(al)
-        LOGGER.debug(al)
+        LOGGER.info("Alert info:\n%s\n%s -> %s, Duration: %d\n"
+                    "State duration: %s, Sent: %s\nJIRA: %s, PD: %s",
+                    al.id, al.previouslevel, al.level, al.duration,
+                    al.state_duration, al.sent,
+                    al.jira_issue, al.pd_incident_key)
         if al.sent:
             if al.level != al.previouslevel:
                 LOGGER.info("State has changed, notify targets")
@@ -50,6 +55,9 @@ def alert():
             elif al.duration < app.config['ALERTING_DELAY']:
                 LOGGER.info("Alert delayed, no dispatch")
                 alertcontroller.dispatch_and_update_status(al, dispatch=False)
+            elif al.level == 'OK':
+                LOGGER.info("Alert OK without being sent, no dispatch")
+                alertcontroller.dispatch_and_update_status(al, dispatch=False)
             else:
                 LOGGER.info("New alert, notify targets")
                 alertcontroller.dispatch_and_update_status(al)
@@ -64,11 +72,12 @@ def maintenance():
     dsf = DeleteSchedule()
     if af.validate_on_submit():
         if af.days.data and af.starttime.data != "":
-            db.add_maintenance_schedule(af.starttime.data, af.duration.data,
-                                        af.key.data, af.val.data,
-                                        bool(af.repeat.data), af.days.data)
+            db.add_maintenance_schedule(
+                af.starttime.data, af.duration.data, af.key.data, af.val.data,
+                af.comment.data, bool(af.repeat.data), af.days.data)
         else:
-            db.activate_maintenance(af.key.data, af.val.data, af.duration.data)
+            db.activate_maintenance(af.key.data, af.val.data,
+                                    af.duration.data, af.comment.data)
         return redirect('/kap/maintenance')
     if df.validate_on_submit():
         db.deactive_maintenance(df.start.data, df.stop.data,
@@ -84,8 +93,13 @@ def maintenance():
                            af=af, df=df, dsf=dsf, tzname=TZNAME)
 
 
-@app.route("/kap/status", methods=['GET'])
+@app.route("/kap/status", methods=['GET', 'POST'])
 def status():
+    quickmaintenance = QuickActivate()
+    if quickmaintenance.validate_on_submit():
+        db.activate_maintenance("id", quickmaintenance.alert_id.data,
+                                "8h", "Muted from status page")
+        return redirect('/kap/status')
     mrules = db.get_active_maintenance_rules()
     aim = []
     active_alerts = db.get_active_alerts()
@@ -94,21 +108,21 @@ def status():
             aim.append(a)
     return render_template('status.html', title="Active alerts",
                            alerts=active_alerts, maintenance=aim,
-                           tzname=TZNAME)
+                           tzname=TZNAME, qm=quickmaintenance)
 
 
 @app.route("/kap/statistics", methods=['GET'])
 def statistics():
-    stats = db.get_24hours_stats()
+    stats = db.get_statistics(24)
     stats.sort(key=operator.itemgetter(1, 2, 4))
-    return render_template('statistics.html', title="Statistics",
+    return render_template('statistics.html', title="Last 24 hours",
                            stats=stats)
 
 
 @app.route("/kap/log", methods=['GET'])
 def log():
-    records = db.get_6hour_log()
-    return render_template('log.html', title="Last 6 hours",
+    records = db.get_log_records(12)
+    return render_template('log.html', title="Last 12 hours",
                            records=records, tzname=TZNAME)
 
 
@@ -138,3 +152,20 @@ def truncate_string(s):
     if len(s) > 200:
         return s[:197] + "..."
     return s
+
+
+@app.template_filter('fontawesome')
+def fontawesome(level, text_and_icon=False):
+    fa_html = '<span class="fas {icon}"></span>'
+    if level == 'CRITICAL':
+        fa_icon = "fa-skull-crossbones"
+    elif level == "WARNING":
+        fa_icon = "fa-exclamation-triangle"
+    elif level == "INFO":
+        fa_icon = "fa-info"
+    else:
+        fa_icon = "fa-check-circle"
+    if text_and_icon:
+        return level.title().ljust(
+            len(level)+2, '\xa0') + fa_html.format(icon=fa_icon)
+    return fa_html.format(icon=fa_icon)

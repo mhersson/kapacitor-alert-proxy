@@ -308,45 +308,14 @@ class AlertController():
             LOGGER.error("Kapacitor is not installed")
         return defined_ticks
 
-    @staticmethod
-    def get_aws_instances():
-        LOGGER.info("Collecting instance info from AWS API")
-        try:
-            session = boto3.Session(region_name=app.config['AWS_REGION'])
-            client = session.client('ec2')
-            response = client.describe_instances()
-            instances = []
-            for reserv in response['Reservations']:
-                instances.extend(reserv['Instances'])
-            return instances
-        except (NoRegionError, NoCredentialsError,
-                ProfileNotFound, ClientError) as e:
-            LOGGER.error(e)
-        except KeyError:
-            LOGGER.error("Failed to collect instance info")
-
     def update_aws_instance_info(self):
-        instances = self.get_aws_instances()
+        instances = self._db.get_aws_instance_info()
         if not instances:
-            LOGGER.error("Got empty instance list from AWS")
             return None
         instance_status = {}
-        LOGGER.info("Updating instances and status codes")
-        for i in instances:
-            try:
-                x = [tag['Value']
-                     for tag in i.get('Tags') if tag['Key'] == 'Name']
-            except TypeError:
-                # Skip instance if no tags are set
-                continue
-            if x:
-                env = [tag['Value'] for tag in i.get('Tags')
-                       if tag['Key'] == 'Environment']
-                if env:
-                    s = {'env': env[0], 'state': i.get('State')['Code']}
-                else:
-                    s = {'state': i.get('State')['Code']}
-                instance_status[x[0]] = s
+        for x in instances:
+            s = {'env': x[1], 'state': x[2]}
+            instance_status[x[0]] = s
         return instance_status
 
     @staticmethod

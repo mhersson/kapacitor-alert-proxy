@@ -22,6 +22,7 @@ class MultiCheckboxField(SelectMultipleField):
 class ActivateForm(FlaskForm):
     key = SelectField(choices=app.config['MAINTENANCE_TAGS'])
     val = StringField(validators=[DataRequired()])
+    comment = StringField(validators=[Optional()])
     duration = StringField(validators=[DataRequired(),
                                        Regexp("[1-9][0-9]*[m|h|d|w]")])
     days = MultiCheckboxField(validators=[Optional()],
@@ -46,4 +47,9 @@ class DeactivateForm(FlaskForm):
 
 class DeleteSchedule(FlaskForm):
     schedule_id = HiddenField(validators=[DataRequired()])
-    submit = SubmitField('Delete')
+    submit = SubmitField("Delete")
+
+
+class QuickActivate(FlaskForm):
+    alert_id = HiddenField(validators=[DataRequired()])
+    submit = SubmitField("Activate")

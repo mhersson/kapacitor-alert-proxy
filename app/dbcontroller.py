@@ -178,8 +178,8 @@ class DBController():
             return result
         return []
 
-    def get_24hours_stats(self):
-        tm = int(time.time() - 24 * 3600)
+    def get_statistics(self, hours):
+        tm = int(time.time() - hours * 3600)
         query = "select id, previouslevel, environment, avg(duration), " + \
             "count(*) from alert_log where level = 'OK' and " + \
             "time >= {} group by id, level, environment".format(tm)
@@ -188,8 +188,8 @@ class DBController():
             return result
         return []
 
-    def get_6hour_log(self):
-        tm = int(time.time() - 6 * 3600)
+    def get_log_records(self, hours):
+        tm = int(time.time() - hours * 3600)
         query = "select time, id, previouslevel, level, environment " + \
             " from alert_log where time >= {} order by time desc".format(tm)
         result = self.select(query, fetchone=False)
@@ -226,15 +226,15 @@ class DBController():
         query = "DELETE FROM flapping_alerts where hash = '{}'".format(alhash)
         self.execute_query(query)
 
-    def activate_maintenance(self, key, value, duration):
+    def activate_maintenance(self, key, value, duration, comment):
         LOGGER.info("Activate maintenance on %s %s for %s",
                     key, value, duration)
         duration_secs = {'m': 60, 'h': 3600, 'd': 86400, 'w': 604800}
         start = int(time.time())
         stop = int(start + (int(duration[:-1]) * duration_secs[duration[-1]]))
         query = "INSERT  INTO active_maintenance " + \
-            "(start, stop, key, value) VALUES (?, ?, ?, ?)"
-        values = (start, stop, key, value)
+            "(start, stop, key, value, comment) VALUES (?, ?, ?, ?, ?)"
+        values = (start, stop, key, value, comment)
         self.execute_query(query, values)
 
     def deactive_maintenance(self, start, stop, key, value):
@@ -248,12 +248,14 @@ class DBController():
     def get_active_maintenance_rules(self):
         # LOGGER.info("Get maintenance rules")
         mrules = []
-        query = "select start, stop, key, value from active_maintenance"
+        query = "select start, stop, key, value, comment " + \
+            "from active_maintenance"
         result = self.select(query, fetchone=False)
         if result:
             for r in result:
                 mrules.append({'start': r[0], 'stop': r[1],
-                               'key': r[2], 'value': r[3]})
+                               'key': r[2], 'value': r[3],
+                               'comment': r[4]})
         if mrules:
             tmp = mrules
             for i, mr in enumerate(mrules):
@@ -265,14 +267,15 @@ class DBController():
         return mrules
 
     def add_maintenance_schedule(self, starttime, duration,
-                                 key, value, repeat, days):
+                                 key, value, comment, repeat, days):
         LOGGER.info("Add maintenance schedule for %s %s", key, value)
-        schedule_id = time.time_ns()  # Create and id from time_ns
+        schedule_id = int(time.time() * 10**7)  # python 3.7 use time.time_ns()
         days = [(schedule_id, day, 0) for day in days]
         query = ("INSERT INTO maintenance_schedule (schedule_id, "
-                 "starttime, duration, key, value, repeat) VALUES ("
-                 "?, ?, ?, ?, ?, ?)")
-        values = (schedule_id, starttime, duration, key, value, repeat)
+                 "starttime, duration, key, value, comment, repeat) VALUES ("
+                 "?, ?, ?, ?, ?, ?, ?)")
+        values = (schedule_id, starttime, duration,
+                  key, value, comment, repeat)
         if self.execute_query(query, values):
             query = ("INSERT INTO maintenance_schedule_days "
                      "(schedule_id, day, runcounter) VALUES (?, ?, ?)")
@@ -286,7 +289,7 @@ class DBController():
             for r in result:
                 sched = {'schedule_id': r[0], 'starttime': r[1],
                          'duration': r[2], 'key': r[3], 'value': r[4],
-                         'repeat': bool(r[5])}
+                         'comment': r[5], 'repeat': bool(r[6])}
                 sched['days'] = self.get_schedule_days(r[0])
                 schedule.append(sched)
         return schedule
@@ -320,6 +323,34 @@ class DBController():
             "WHERE schedule_id = %d" % schedule_id
         self.execute_query(query)
 
+    def get_aws_instance_info(self):
+        query = "SELECT host, environment, state " + \
+            "from aws_instances"
+        result = self.select(query, fetchone=False)
+        if result:
+            return result
+        return []
+
+    def insert_aws_instance_info(self, info):
+        query = "INSERT INTO aws_instances (host, environment, state) " + \
+            "VALUES(?, ?, ?)"
+        rows = self.execute_many(query, info)
+        LOGGER.debug("Inserted %d instance records", rows)
+
+    def update_aws_instance_info(self, info):
+        host_last = []
+        for x in info:
+            host_last.append(x[1:] + x[:1])
+        query = "UPDATE aws_instances set environment = ?, state = ? " + \
+            "where host = ?"
+        rows = self.execute_many(query, host_last)
+        LOGGER.debug("Updated %d instance records", rows)
+
+    def delete_aws_instance_info(self, info):
+        query = "DELETE from aws_instances where host = ?"
+        rows = self.execute_many(query, info)
+        LOGGER.debug("Deleted %d instance records", rows)
+
 
 CREATE_TABLES_SQL = '''
 
@@ -341,11 +372,12 @@ CREATE TABLE IF NOT EXISTS flapping_alerts
 (hash TEXT PRIMARY KEY, id TEXT, time INTEGER);
 
 CREATE TABLE IF NOT EXISTS active_maintenance
-(start INTEGER, stop INTEGER, key TEXT, value TEXT);
+(start INTEGER, stop INTEGER, key TEXT, value TEXT, comment TEXT);
 
 CREATE TABLE IF NOT EXISTS maintenance_schedule
 (schedule_id INTEGER PRIMARY KEY,
-starttime TEXT, duration TEXT, key TEXT, value TEXT, repeat INTEGER);
+starttime TEXT, duration TEXT, key TEXT, value TEXT, comment TEXT,
+repeat INTEGER);
 
 CREATE TABLE IF NOT EXISTS maintenance_schedule_days
 (schedule_id INTEGER, day INTEGER, runcounter INTEGER,
@@ -355,6 +387,10 @@ CREATE TABLE IF NOT EXISTS alert_log(hash TEXT, time INTEGER, id TEXT,
 message TEXT, environment TEXT, host TEXT, previouslevel TEXT, level TEXT,
 duration INTEGER, pagerduty TEXT, jira TEXT,
 UNIQUE (hash, time));
+
+CREATE TABLE IF NOT EXISTS aws_instances
+(host TEXT PRIMARY KEY, environment TEXT, state INTEGER,
+modified default CURRENT_TIMESTAMP);
 
 CREATE TRIGGER IF NOT EXISTS delete_active_alert_tags
 AFTER DELETE on active_alerts
@@ -366,5 +402,11 @@ CREATE TRIGGER IF NOT EXISTS delete_maintenance_schedule_days
 AFTER DELETE on maintenance_schedule
 BEGIN
 DELETE FROM maintenance_schedule_days where schedule_id = OLD.schedule_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_aws_instance_info_modified_time
+AFTER UPDATE on aws_instances
+BEGIN
+UPDATE aws_instances set modified = CURRENT_TIMESTAMP where host = new.host;
 END;
 '''

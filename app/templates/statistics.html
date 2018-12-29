@@ -1,19 +1,27 @@
 {% extends "base.html" %} {% block main %}
-<div style="margin-top: 50px">
+<div style="margin-top: 30px">
 
+  <div style="height: 50px; text-align: center;">
+    <div class="h-50 d-inline-block alert-info" style="width: 155px">INFO
+      <span class="fas fa-info"></span></div>
+    <div class="h-50 d-inline-block alert-warning" style="width: 155px">WARNING
+      <span class="fas fa-exclamation-triangle"></span></div>
+    <div class="h-50 d-inline-block alert-danger" style="width: 155px">CRITICAL
+      <span class="fas fa-skull-crossbones"></span></div>
+  </div>
     {% if not stats %}
     <div style="text-align: center" class="alert alert-success" role="alert">
         <h4>No statistics to show</h4>
     </div>
     {% else %}
-    <p style="text-align: right">Statistics for the last 24 hours</p>
     <table style="font-size: 14px" class="table table-sm table-bordered">
         <thead class="thead-dark">
             <tr class="table-danger">
-                <th>Id</th>
+                <th>Alert id</th>
                 <th>Environment</th>
-                <th>Average Duration</th>
+                <th>Average duration</th>
                 <th>Count</th>
+                <th class="text-center">Level</th>
             </tr>
         </thead>
         <tbody>
@@ -29,6 +37,7 @@
                 <td>{{ a[2] }}</td>
                 <td class="text-right">{{ a[3] | timedelta }}</td>
                 <td class="text-right">{{ a[4] }}</td>
+                <td class="text-center">{{ a[1] | fontawesome | safe }}</td>
             </tr>
             {% endfor %}
         </tbody>

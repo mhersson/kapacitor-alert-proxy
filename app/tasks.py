@@ -7,14 +7,79 @@ Created by: Morten Hersson, <morten@escenic.com>
 Copyright (c) 2018 Morten Hersson
 """
 import time
+import boto3
 import calendar
 import datetime
 import requests
+from botocore.exceptions import NoCredentialsError, ProfileNotFound
+from botocore.exceptions import NoRegionError, ClientError
 
 from app import app, LOGGER
 from app.alert import Alert
 from app.alertcontroller import AlertController
 from app.dbcontroller import DBController
+
+
+class AWSInfoCollector():
+    """AWSInfoCollector collects aws instance info through AWS API"""
+
+    def __init__(self):
+        super(AWSInfoCollector, self).__init__()
+        self._db = DBController()
+
+    @staticmethod
+    def _collect():
+        LOGGER.debug("Collecting instance info from AWS API")
+        try:
+            session = boto3.Session(region_name=app.config['AWS_REGION'])
+            client = session.client('ec2')
+            response = client.describe_instances()
+            instances = []
+            for reserv in response['Reservations']:
+                instances.extend(reserv['Instances'])
+            return instances
+        except (NoRegionError, NoCredentialsError,
+                ProfileNotFound, ClientError) as e:
+            LOGGER.error(e)
+        except KeyError:
+            LOGGER.error("Failed to collect instance info")
+
+    def get_info_from_api(self):
+        instances = self._collect()
+        if not instances:
+            LOGGER.error("Got empty instance list from AWS")
+            return None
+        instance_info = []
+        LOGGER.debug("Updating instances and status codes")
+        for i in instances:
+            try:
+                x = [tag['Value']
+                     for tag in i.get('Tags') if tag['Key'] == 'Name']
+            except TypeError:
+                # Skip instance if no tags are set
+                continue
+            if x:
+                env = [tag['Value'] for tag in i.get('Tags')
+                       if tag['Key'] == 'Environment']
+                if env:
+                    instance_info.append((x[0], env[0], i['State']['Code']))
+                else:
+                    instance_info.append((x[0], None, i['State']['Code']))
+        return instance_info
+
+    def run(self):
+        LOGGER.info("Updating AWS instance info")
+        current = self._db.get_aws_instance_info()
+        new = self.get_info_from_api()
+        updates = list(set(current) & set(new))
+        inserts = list(set(new) - set(current))
+        deletes = list(set(current) - set(new))
+        if updates:
+            self._db.update_aws_instance_info(updates)
+        if inserts:
+            self._db.insert_aws_instance_info(inserts)
+        if deletes:
+            self._db.delete_aws_instance_info(deletes)
 
 
 class FlapDetective():
@@ -47,7 +112,7 @@ class FlapDetective():
             elif a[2] < self.limit and a[0] in flaphash:
                 # Too low count to be marked as flapping
                 self.db.unset_flapping(a[0], a[1])
-                self.notify(a[1], flapping=False)
+                # self.notify(a[1], flapping=False)
         # If alert is no longer in the log it is not flapping, unset
         for a in [(x[0], x[1]) for x in flapping_alerts
                   if x[0] not in logged_hash]:
@@ -57,12 +122,12 @@ class FlapDetective():
         if app.config['SLACK_ENABLED']:
             if flapping:
                 a = Alert(alertid, 0, "Flapping detected: " + alertid,
-                          'CRITICAL', 'OK', None, None)
+                          'INFO', 'OK', None, None)
                 if reminder:
                     a.message = "Flapping detected (Reminder): " + alertid
             else:
                 a = Alert(alertid, 0, "Flapping resolved: " + alertid,
-                          'OK', 'CRITICAL', None, None)
+                          'OK', 'INFO', None, None)
             self.alertctrl.slack.post(a)
 
 
@@ -132,7 +197,8 @@ class MaintenanceScheduler():
                     and self._check_starttime(now, schedule['starttime'])):
                 LOGGER.info("Activating scheduled maintenance")
                 self.db.activate_maintenance(
-                    schedule['key'], schedule['value'], schedule['duration'])
+                    schedule['key'], schedule['value'],
+                    schedule['duration'], schedule['comment'])
                 self.db.update_day_runcounter(
                     schedule['schedule_id'], now.weekday())
                 if 0 not in self.db.get_schedule_runcounter(
