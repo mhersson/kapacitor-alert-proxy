@@ -17,23 +17,31 @@ class Slack():
         self._url = url
         self._channel = channel
         self._username = username
+        self._colors = {"OK": "good", "INFO": "#439FE0",
+                        "WARNING": "warning", "CRITICAL": "danger"}
 
-    def _create_message(self, alert):
-        LOGGER.info("Creating slack message")
-        colors = {"OK": "good", "INFO": "#439FE0",
-                  "WARNING": "warning", "CRITICAL": "danger"}
-
+    def post(self, alert):
+        '''Post alert to slack'''
         slack_json = {"username": self._username,
                       "channel": self._channel,
                       "attachments": [{"fallback": alert.message,
-                                       "color": colors[alert.level],
+                                       "color": self._colors[alert.level],
                                        "text": alert.message}]}
-        return slack_json
-
-    def post(self, alert):
-        message = self._create_message(alert)
         LOGGER.info("Posting to channel %s", self._channel)
-        res = requests.post(self._url, json=message)
+        res = requests.post(self._url, json=slack_json)
+        if res:
+            LOGGER.debug("Response from server: %d %s",
+                         res.status_code, res.content.decode())
+
+    def post_message(self, title, message, color='INFO'):
+        '''Post message with title to slack '''
+        slack_json = {"username": self._username,
+                      "channel": self._channel,
+                      "attachments": [{"title": title,
+                                       "color": self._colors[color],
+                                       "text": message}]}
+        LOGGER.info("Posting to channel %s", self._channel)
+        res = requests.post(self._url, json=slack_json)
         if res:
             LOGGER.debug("Response from server: %d %s",
                          res.status_code, res.content.decode())

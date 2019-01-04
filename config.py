@@ -31,6 +31,11 @@ class Config(object):
     # flapping and the hold back the alerts, and instead
     # let you know the alert is flapping to reduce the number of messages sent
     FLAPPING_DETECTION_ENABLED = True
+    # Size of time window in minutes to check for flapping alerts
+    FLAPPING_WINDOW = 60
+    # The number of alerts within the FLAPPING_WINDOW
+    # before the alert is considered flapping
+    FLAPPING_LIMIT = 4
     # Number of seconds to hold back an alert before dispatching to targets
     # This is a global setting and affects all alerts. To hold back individual
     # alerts use STATE_DURATION
@@ -45,7 +50,6 @@ class Config(object):
     KAOS_CUSTOMER = "Test-Customer"
     KAOS_URL = "https://localhost/kaos/update/"
     KAOS_CERT = "server_bundle.pem"
-    KAOS_IGNORE_MAINTENANCE = False
     KAOS_EXCLUDED_TAGS = []
 
     # Write stats to influxdb
@@ -59,10 +63,6 @@ class Config(object):
     SLACK_URL = ""
     SLACK_CHANNEL = "#alerts"
     SLACK_USERNAME = "kapacitor"
-    # Only send alerts when the state changes
-    SLACK_STATE_CHANGE_ONLY = True
-    # Send alerts to slack even during maintenance
-    SLACK_IGNORE_MAINTENANCE = False
     # List of tagkey tagkey/value dictionaries that will not trigger slack
     SLACK_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
                            {'key': 'Environment', 'value': 'staging'}]
@@ -71,10 +71,6 @@ class Config(object):
     PAGERDUTY_ENABLED = False
     PAGERDUTY_URL = "https://events.pagerduty.com/generic/2010-04-15/create_event.json"  # noqa
     PAGERDUTY_SERVICE_KEY = ""
-    # Only send events when the alert state changes
-    PAGERDUTY_STATE_CHANGE_ONLY = True
-    # Send events to pagerduty even during maintenance
-    PAGERDUTY_IGNORE_MAINTENANCE = False
     # List of tagkey tagkey/value dictionaries that will not trigger pagerduty
     PAGERDUTY_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
                                {'key': 'Environment', 'value': 'staging'}]
@@ -91,6 +87,9 @@ class Config(object):
     # List of tagkey tagvalue dictionaries that will not trigger an alert
     JIRA_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
                           {'key': 'Environment', 'value': 'staging'}]
+    # Post the url for newly created tickets to the slack channel
+    # (Requires SLACK_ENABLED and a working slack configuration)
+    JIRA_URL_TO_SLACK = False
 
     GRAFANA_ENABLED = False
     # For this to work the url vars in Grafana must be among the tag

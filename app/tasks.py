@@ -15,7 +15,6 @@ from botocore.exceptions import NoCredentialsError, ProfileNotFound
 from botocore.exceptions import NoRegionError, ClientError
 
 from app import app, LOGGER
-from app.alert import Alert
 from app.alertcontroller import AlertController
 from app.dbcontroller import DBController
 
@@ -90,48 +89,52 @@ class FlapDetective():
         LOGGER.info("Initiating flap detective")
         self.alertctrl = AlertController()
         self.db = DBController()
-        self.limit = 3
+        self.limit = app.config['FLAPPING_LIMIT']
+        self.slack_enabled = app.config['SLACK_ENABLED']
 
     def run(self):
         LOGGER.info("Searching for flapping alerts")
-        logged_alerts = self.db.get_log_count()
+        logged_alerts = self.db.get_log_count_interval()
         flapping_alerts = self.db.get_flapping_alerts()
         flaphash = [x[0] for x in flapping_alerts]
         logged_hash = []
         for a in logged_alerts:
             logged_hash.append(a[0])
-            if a[2] >= self.limit and a[0] not in flaphash:
+            if a[2] > self.limit and a[0] not in flaphash:
                 # Set flapping
-                self.db.set_flapping(a[0], a[1])
-                self.notify(a[1])
-            elif a[2] >= self.limit and a[0] in flaphash:
+                self.db.set_flapping(a[0], a[1], a[3])
+                self.notify(a[1], a[2])
+            elif a[2] > self.limit and a[0] in flaphash:
                 # Send reminder every hour if alert is still flapping
+                self.db.update_flapping(a[0], a[3])
                 flaptime = [x[2] for x in flapping_alerts if x[0] == a[0]]
                 if 0 < (time.time() % 3600 - flaptime[0] % 3600) <= 60:
-                    self.notify(a[1], reminder=True)
-            elif a[2] < self.limit and a[0] in flaphash:
+                    self.notify(a[1], a[2], reminder=True)
+            elif a[2] <= self.limit and a[0] in flaphash:
                 # Too low count to be marked as flapping
-                self.db.unset_flapping(a[0], a[1])
-                # self.notify(a[1], flapping=False)
+                # Check that time now is bigger than
+                # modified + quarantine interval
+                quarantine = [x[3] + x[4] for x in flapping_alerts
+                              if x[0] == a[0]]
+                if time.time() > quarantine[0]:
+                    self.db.unset_flapping(a[0], a[1])
         # If alert is no longer in the log it is not flapping, unset
         for a in [(x[0], x[1]) for x in flapping_alerts
                   if x[0] not in logged_hash]:
             self.db.unset_flapping(a[0], a[1])
 
-    def notify(self, alertid, flapping=True, reminder=False):
-        if app.config['SLACK_ENABLED']:
+    def notify(self, alertid, count, flapping=True, reminder=False):
+        if self.slack_enabled:
             if flapping:
-                a = Alert(alertid, 0, "Flapping detected: " + alertid,
-                          'INFO', 'OK', None, None)
+                title = "Flapping detected"
+                message = "%s, flap count: %d" % (alertid, count)
                 if reminder:
-                    a.message = "Flapping detected (Reminder): " + alertid
-            else:
-                a = Alert(alertid, 0, "Flapping resolved: " + alertid,
-                          'OK', 'INFO', None, None)
-            self.alertctrl.slack.post(a)
+                    title = "Flapping detected (Reminder)"
+                self.alertctrl.slack.post_message(title, message)
 
 
 class KAOS():
+
     def __init__(self):
         LOGGER.info("Initiating KAOS scheduler")
         self.db = DBController()
@@ -141,8 +144,7 @@ class KAOS():
         kaos_report = {app.config['KAOS_CUSTOMER']: []}
         mrules = self.db.get_active_maintenance_rules()
         for v in self.db.get_active_alerts():
-            if (app.config['KAOS_IGNORE_MAINTENANCE'] or
-                    not self.alertctrl.affected_by_mrules(mrules, v)):
+            if not self.alertctrl.affected_by_mrules(mrules, v):
                 if self.alertctrl.contains_excluded_tags(
                         app.config['KAOS_EXCLUDED_TAGS'], v.tags):
                     continue
@@ -185,6 +187,7 @@ class KAOS():
 
 
 class MaintenanceScheduler():
+
     def __init__(self):
         LOGGER.info("Initiating maintenance scheduler")
         self.db = DBController()

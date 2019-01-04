@@ -6,13 +6,11 @@ Module: alertcontroller.py
 Created: 27.Dec.2018
 Created by: Morten Hersson, <mhersson@gmail.com>
 '''
+import os
 import re
 import time
-import boto3
 import subprocess
 from datetime import datetime
-from botocore.exceptions import NoCredentialsError, ProfileNotFound
-from botocore.exceptions import NoRegionError, ClientError
 
 from app import app, LOGGER
 from app.alert import Alert
@@ -138,12 +136,14 @@ class AlertController():
     def dispatch_and_update_status(self, al, dispatch=True):
         if dispatch:
             LOGGER.info("Dispatch to all targets")
-            al.sent = True
             mrules = self._db.get_active_maintenance_rules()
-            in_maintenance = self.affected_by_mrules(mrules, al)
-            self.run_slack(in_maintenance, al)
-            al.pd_incident_key = self.run_pagerduty(in_maintenance, al)
-            al.jira_issue = self.run_jira(in_maintenance, al)
+            if not self.affected_by_mrules(mrules, al):
+                al.sent = True
+                self.run_slack(al)
+                al.pd_incident_key = self.run_pagerduty(al)
+                al.jira_issue = self.run_jira(al)
+            else:
+                LOGGER.info("Alert is in maintenance, no notifications sent")
         self.update_active_alerts(al)
         self._influx.update(al)
 
@@ -158,18 +158,14 @@ class AlertController():
         if al.level != al.previouslevel:
             self._db.log_alert(al)
 
-    def run_slack(self, in_maintenance, al):
-        if app.config['SLACK_ENABLED'] and (
-                not in_maintenance or
-                app.config['SLACK_IGNORE_MAINTENANCE']):
+    def run_slack(self, al):
+        if app.config['SLACK_ENABLED']:
             if not self.contains_excluded_tags(
                     app.config['SLACK_EXCLUDED_TAGS'], al.tags):
                 self.slack.post(al)
 
-    def run_pagerduty(self, in_maintenance, al):
-        if app.config['PAGERDUTY_ENABLED'] and (
-                not in_maintenance or
-                app.config['PAGERDUTY_IGNORE_MAINTENANCE']):
+    def run_pagerduty(self, al):
+        if app.config['PAGERDUTY_ENABLED']:
             if self.contains_excluded_tags(
                     app.config['PAGERDUTY_EXCLUDED_TAGS'], al.tags):
                 return al.pd_incident_key
@@ -179,14 +175,22 @@ class AlertController():
             LOGGER.info("Pagerduty incident key: %s", al.pd_incident_key)
         return al.pd_incident_key
 
-    def run_jira(self, in_maintenance, al):
-        if app.config['JIRA_ENABLED'] and not in_maintenance:
+    def run_jira(self, al):
+        if app.config['JIRA_ENABLED']:
             if self.contains_excluded_tags(
                     app.config['JIRA_EXCLUDED_TAGS'], al.tags):
                 return al.jira_issue
             al.jira_issue = self.jira.post(al)
             LOGGER.info("JIRA issue: %s", al.jira_issue)
+            if al.jira_issue and al.level == 'CRITICAL':
+                self.post_jira_url_to_slack(al.jira_issue)
         return al.jira_issue
+
+    def post_jira_url_to_slack(self, ticket):
+        if app.config['SLACK_ENABLED'] and app.config['JIRA_URL_TO_SLACK']:
+            title = "New JIRA ticket: %s" % ticket
+            message = os.path.join(app.config['JIRA_SERVER'], "browse", ticket)
+            self.slack.post_message(title, message)
 
     @staticmethod
     def add_grafana_url(al):
@@ -307,6 +311,17 @@ class AlertController():
         except FileNotFoundError:
             LOGGER.error("Kapacitor is not installed")
         return defined_ticks
+
+    @staticmethod
+    def get_tick_script_content(script):
+        try:
+            byte_ticks = subprocess.check_output(
+                ['kapacitor', 'show', script])
+            return byte_ticks.decode()
+        except subprocess.CalledProcessError:
+            LOGGER.error("Failed to show tick script")
+        except FileNotFoundError:
+            LOGGER.error("Kapacitor is not installed")
 
     def update_aws_instance_info(self):
         instances = self._db.get_aws_instance_info()

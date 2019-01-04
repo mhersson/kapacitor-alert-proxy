@@ -9,7 +9,7 @@ Created by: Morten Hersson, <mhersson@gmail.com>
 import os
 import time
 import sqlite3
-from app import INSTALLDIR, LOGGER
+from app import app, INSTALLDIR, LOGGER
 from app.alert import Alert
 
 
@@ -20,8 +20,8 @@ class DBController():
 
     def __init__(self):
         super(DBController, self).__init__()
-
         self.db = os.path.join(INSTALLDIR, 'db/kap.db')
+        self.flapping_window = app.config['FLAPPING_WINDOW']
 
     def create_tables(self):
         LOGGER.info("Creating database tables")
@@ -167,12 +167,17 @@ class DBController():
                   al.jira_issue)
         self.execute_query(query, values)
 
-    def get_log_count(self):
+    def get_log_count_interval(self):
         # LOGGER.info("Getting alert occurences from alert log")
         now = int(time.time())
-        query = "select hash, id, count(*) from alert_log " + \
-            "where time >= {} and level = 'OK' group by hash, id".format(
-                now - (30 * 60))
+        query = ("select hash, id, count(*) as num, max(diff) as diff "
+                 "from (select l.hash, l.id, l.time - (select max(i_l.time) "
+                 "from alert_log i_l where i_l.time < l.time and "
+                 "i_l.id = l.id and i_l.time >= {tlimit} and "
+                 "i_l.previouslevel = 'OK' and i_l.level != 'OK') as diff "
+                 "from alert_log l where l.time >= {tlimit}  and "
+                 "l.previouslevel = 'OK' and l.level != 'OK') "
+                 "group by id;".format(tlimit=now - (self.flapping_window * 60)))
         result = self.select(query, fetchone=False)
         if result:
             return result
@@ -207,18 +212,29 @@ class DBController():
 
     def get_flapping_alerts(self):
         # LOGGER.info("Get all alerts marked as flapping")
-        query = "select hash, id, time from flapping_alerts"
+        query = "select hash, id, time, quarantine, modified " + \
+            "from flapping_alerts"
         result = self.select(query, fetchone=False)
         if result:
             return result
         return []
 
-    def set_flapping(self, alhash, alid):
+    def set_flapping(self, alhash, alid, interval):
         LOGGER.info("Setting flapping on %s", alid)
         now = int(time.time())
-        query = "INSERT INTO flapping_alerts (hash, id, time) " + \
-            "VALUES (?, ?, ?)"
-        values = (alhash, alid, now)
+        quarantine = int(interval * 1.2)
+        query = "INSERT INTO flapping_alerts (hash, id, time, " + \
+            "quarantine, modified) VALUES (?, ?, ?, ?, ?)"
+        values = (alhash, alid, now, quarantine, now)
+        self.execute_query(query, values)
+
+    def update_flapping(self, alhash, interval):
+        LOGGER.debug("Updating flapping quarantine interval")
+        now = int(time.time())
+        quarantine = int(interval * 1.2)
+        query = "UPDATE flapping_alerts set quarantine = ?, modified = ? " + \
+            "where hash = ?"
+        values = (quarantine, now, alhash)
         self.execute_query(query, values)
 
     def unset_flapping(self, alhash, alid):
@@ -347,8 +363,9 @@ class DBController():
         LOGGER.debug("Updated %d instance records", rows)
 
     def delete_aws_instance_info(self, info):
+        instances = [(x[0]) for x in info]
         query = "DELETE from aws_instances where host = ?"
-        rows = self.execute_many(query, info)
+        rows = self.execute_many(query, instances)
         LOGGER.debug("Deleted %d instance records", rows)
 
 
@@ -369,7 +386,8 @@ UNIQUE(hash, key, value)
 FOREIGN KEY (hash) REFERENCES active_alerts(hash));
 
 CREATE TABLE IF NOT EXISTS flapping_alerts
-(hash TEXT PRIMARY KEY, id TEXT, time INTEGER);
+(hash TEXT PRIMARY KEY, id TEXT, time INTEGER,
+quarantine INTEGER, modified INTEGER);
 
 CREATE TABLE IF NOT EXISTS active_maintenance
 (start INTEGER, stop INTEGER, key TEXT, value TEXT, comment TEXT);

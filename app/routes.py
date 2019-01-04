@@ -10,7 +10,7 @@ import time
 import calendar
 import operator
 from datetime import timedelta
-from flask import Response, request, render_template, redirect
+from flask import Response, request, render_template, redirect, jsonify
 from app import app, LOGGER, TZNAME
 from app.forms.maintenance import ActivateForm, DeactivateForm, DeleteSchedule
 from app.forms.maintenance import QuickActivate
@@ -45,7 +45,7 @@ def alert():
         else:
             if app.config['FLAPPING_DETECTION_ENABLED'] and db.is_flapping(al):
                 LOGGER.info("Alert is flapping")
-                al.message = "Alert is flapping! " + al.message
+                al.message = "Flapping! " + al.message
                 alertcontroller.dispatch_and_update_status(al, dispatch=False)
                 return Response(response={'Success': True},
                                 status=200, mimetype='application/json')
@@ -131,6 +131,15 @@ def ticks():
     defined_ticks = alertcontroller.get_defined_tick_scripts()
     return render_template('ticks.html', title="Defined tick scripts",
                            ticks=defined_ticks)
+
+
+@app.route("/kap/tick-content", methods=['GET'])
+def tick_content():
+    tick = request.args.get('tick')
+    content = alertcontroller.get_tick_script_content(tick)
+    if not content:
+        content = "Failed to read tick script"
+    return jsonify(data=content)
 
 
 @app.template_filter('ctime')

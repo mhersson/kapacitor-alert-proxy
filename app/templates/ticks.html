@@ -14,7 +14,7 @@
                 <th>Type</th>
                 <th>Status</th>
                 <th>Executing</th>
-                <th>Database and retention policy</th>
+                <th class="text-center">Info</th>
             </tr>
         </thead>
         <tbody>
@@ -24,13 +24,37 @@
                 <td>{{ t[1] }}</td>
                 <td>{{ t[2] }}</td>
                 <td>{{ t[3] }}</td>
-                <td>{{ t[4] }}</td>
+		<td class="text-center">
+		  <button id="tickModalBtn" type="button" class="btn btn-sm btn-block"
+			  data-toggle="modal" data-target="#tickContentModal" data-tick="{{ t[0] }}">
+		    <i class="far fa-file-code"></i>
+		  </button>
+		</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 
     {% endif %}
-</div>
+
+    <!-- Modal -->
+    <div class="modal fade" id="tickContentModal" tabindex="-1" role="dialog" aria-labelledby="tickContentModalTitle" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+	    <div class="modal-content">
+		<div class="modal-header bg-secondary">
+		    <h5 class="modal-title" id="tickContentModalTitle">Tick Script</h5>
+		    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+		    <span aria-hidden="true">&times;</span>
+		    </button>
+		</div>
+		<div id="tickContentModalBody" class="modal-body">
+		    
+		</div>
+	    </div>
+	</div>
+    </div> <!-- End Modal -->
+
+</div> <!-- End  -->
+
 
 {% endblock %}
