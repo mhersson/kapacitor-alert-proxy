@@ -28,6 +28,8 @@ def alert():
     al = alertcontroller.create_alert(request.json)
     if al is not None:
         al = db.get_tickets_and_keys(al)
+        if not al.grafana_url:
+            al.grafana_url = alertcontroller.add_grafana_url(al)
         LOGGER.info("Alert info:\n%s\n%s -> %s, Duration: %d\n"
                     "State duration: %s, Sent: %s\nJIRA: %s, PD: %s",
                     al.id, al.previouslevel, al.level, al.duration,
