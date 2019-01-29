@@ -9,7 +9,7 @@ Created by: Morten Hersson, <mhersson@gmail.com>
 '''
 
 
-class Config(object):
+class Config():
     # Server settings
     SERVER_ADDRESS = "0.0.0.0"
     SERVER_PORT = 9095
@@ -66,6 +66,9 @@ class Config(object):
     # List of tagkey tagkey/value dictionaries that will not trigger slack
     SLACK_EXCLUDED_TAGS = [{'key': 'Environment', 'value': 'test'},
                            {'key': 'Environment', 'value': 'staging'}]
+    # Send summary message with stats for the last hour for all environments
+    # This will include environments event if they are among the excluded tags
+    SLACK_SUMMARY = True
 
     # Pagerduty
     PAGERDUTY_ENABLED = False

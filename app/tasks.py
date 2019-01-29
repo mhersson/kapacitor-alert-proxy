@@ -133,6 +133,33 @@ class FlapDetective():
                 self.alertctrl.slack.post_message(title, message)
 
 
+class SlackAlertSummary():
+    def __init__(self):
+        super(SlackAlertSummary, self).__init__()
+        LOGGER.info("Initiating SlackAlertSummary")
+        self.alertctrl = AlertController()
+        self.db = DBController()
+
+    def run(self):
+        if int(time.time()) % 3600 <= 60:
+            LOGGER.info("Creating alert summary")
+            summary = self.db.get_alert_summary()
+            if summary:
+                t = 0
+                s = 0
+                p = 0
+                for x in summary:
+                    if x[0] == 'test':
+                        t = x[1]
+                    if x[0] == 'staging':
+                        s = x[1]
+                    if x[0] == 'production':
+                        p = x[1]
+                msg = "Test: {}, Staging: {}, Production: {}".format(t, s, p)
+                title = "Last hour alert statistics"
+                self.alertctrl.slack.post_message(title, msg)
+
+
 class KAOS():
 
     def __init__(self):
