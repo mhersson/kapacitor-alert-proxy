@@ -91,6 +91,7 @@ class FlapDetective():
         self.db = DBController()
         self.limit = app.config['FLAPPING_LIMIT']
         self.slack_enabled = app.config['SLACK_ENABLED']
+        self.excluded_tags = app.config['SLACK_EXCLUDED_TAGS']
 
     def run(self):
         LOGGER.info("Searching for flapping alerts")
@@ -100,17 +101,17 @@ class FlapDetective():
         logged_hash = []
         for a in logged_alerts:
             logged_hash.append(a[0])
-            if a[2] > self.limit and a[0] not in flaphash:
+            if a[3] > self.limit and a[0] not in flaphash:
                 # Set flapping
-                self.db.set_flapping(a[0], a[1], a[3])
-                self.notify(a[1], a[2])
-            elif a[2] > self.limit and a[0] in flaphash:
+                self.db.set_flapping(a[0], a[1], a[2], a[3])
+                self.notify(a[1], a[2], a[3])
+            elif a[3] > self.limit and a[0] in flaphash:
                 # Send reminder every hour if alert is still flapping
-                self.db.update_flapping(a[0], a[3])
+                self.db.update_flapping(a[0], a[4])
                 flaptime = [x[2] for x in flapping_alerts if x[0] == a[0]]
                 if 0 < (time.time() % 3600 - flaptime[0] % 3600) <= 60:
-                    self.notify(a[1], a[2], reminder=True)
-            elif a[2] <= self.limit and a[0] in flaphash:
+                    self.notify(a[1], a[2], a[3], reminder=True)
+            elif a[3] <= self.limit and a[0] in flaphash:
                 # Too low count to be marked as flapping
                 # Check that time now is bigger than
                 # modified + quarantine interval
@@ -123,8 +124,10 @@ class FlapDetective():
                   if x[0] not in logged_hash]:
             self.db.unset_flapping(a[0], a[1])
 
-    def notify(self, alertid, count, flapping=True, reminder=False):
-        if self.slack_enabled:
+    def notify(self, alertid, environ, count, flapping=True, reminder=False):
+        tag = [{'key': 'Environment', 'value': environ}]
+        ignore = self.alertctrl.contains_excluded_tags(self.excluded_tags, tag)
+        if self.slack_enabled and not ignore:
             if flapping:
                 title = "Flapping detected"
                 message = "%s, flap count: %d" % (alertid, count)

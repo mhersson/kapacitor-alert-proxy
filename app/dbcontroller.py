@@ -170,8 +170,10 @@ class DBController():
     def get_log_count_interval(self):
         # LOGGER.info("Getting alert occurences from alert log")
         now = int(time.time())
-        query = ("select hash, id, count(*) as num, max(diff) as diff "
-                 "from (select l.hash, l.id, l.time - (select max(i_l.time) "
+        query = ("select hash, id, environment, count(*) as num, "
+                 "max(diff) as diff "
+                 "from (select l.hash, l.id, l.environment, "
+                 "l.time - (select max(i_l.time) "
                  "from alert_log i_l where i_l.time < l.time and "
                  "i_l.id = l.id and i_l.time >= {tlimit} and "
                  "i_l.previouslevel = 'OK' and i_l.level != 'OK') as diff "
@@ -229,13 +231,13 @@ class DBController():
             return result
         return []
 
-    def set_flapping(self, alhash, alid, interval):
+    def set_flapping(self, alhash, alid, environment, interval):
         LOGGER.info("Setting flapping on %s", alid)
         now = int(time.time())
         quarantine = int(interval * 1.2)
-        query = "INSERT INTO flapping_alerts (hash, id, time, " + \
-            "quarantine, modified) VALUES (?, ?, ?, ?, ?)"
-        values = (alhash, alid, now, quarantine, now)
+        query = "INSERT INTO flapping_alerts (hash, id, environment, " + \
+            "time, quarantine, modified) VALUES (?, ?, ?, ?, ?, ?)"
+        values = (alhash, alid, environment, now, quarantine, now)
         self.execute_query(query, values)
 
     def update_flapping(self, alhash, interval):
@@ -396,7 +398,7 @@ UNIQUE(hash, key, value)
 FOREIGN KEY (hash) REFERENCES active_alerts(hash));
 
 CREATE TABLE IF NOT EXISTS flapping_alerts
-(hash TEXT PRIMARY KEY, id TEXT, time INTEGER,
+(hash TEXT PRIMARY KEY, id TEXT, environment TEXT, time INTEGER,
 quarantine INTEGER, modified INTEGER);
 
 CREATE TABLE IF NOT EXISTS active_maintenance
