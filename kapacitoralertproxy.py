@@ -9,7 +9,7 @@ Created by: Morten Hersson, <mhersson@gmail.com>
 from app import app
 from app.dbcontroller import DBController
 from app.tasks import MaintenanceScheduler, KAOS, FlapDetective
-from app.tasks import AWSInfoCollector
+from app.tasks import AWSInfoCollector, SlackAlertSummary
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
@@ -28,6 +28,9 @@ if __name__ == '__main__':
         awscollector = AWSInfoCollector()
         awscollector.run()  # Run on startup to get updated info
         scheduler.add_job(awscollector.run, 'interval', seconds=60)
+    if app.config['SLACK_ENABLED'] and app.config['SLACK_SUMMARY']:
+        slacksummary = SlackAlertSummary()
+        scheduler.add_job(slacksummary.run, 'interval', seconds=60)
     scheduler.start()
     app.run(host=app.config['SERVER_ADDRESS'], port=app.config['SERVER_PORT'],
             debug=False, threaded=True)

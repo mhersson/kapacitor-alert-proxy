@@ -202,6 +202,16 @@ class DBController():
             return result
         return []
 
+    def get_alert_summary(self, hours=1):
+        tm = int(time.time() - hours * 3600)
+        query = ("select environment, count(*) "
+                 "from alert_log where time >= {} and level != 'OK' "
+                 "group by environment".format(tm))
+        result = self.select(query, fetchone=False)
+        if result:
+            return result
+        return []
+
     def is_flapping(self, al):
         query = "SELECT 1 FROM flapping_alerts where hash = '{}'".format(
             al.alhash)
