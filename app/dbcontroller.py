@@ -195,10 +195,14 @@ class DBController():
             return result
         return []
 
-    def get_log_records(self, hours):
+    def get_log_records(self, hours, environment=None):
         tm = int(time.time() - hours * 3600)
         query = "select time, id, previouslevel, level, environment " + \
             " from alert_log where time >= {} order by time desc".format(tm)
+        if environment:
+            query = ("select time, id, previouslevel, level, environment "
+                     "from alert_log where time >= {} and environment = '{}' "
+                     "order by time desc".format(tm, environment))
         result = self.select(query, fetchone=False)
         if result:
             return result
@@ -375,7 +379,7 @@ class DBController():
         LOGGER.debug("Updated %d instance records", rows)
 
     def delete_aws_instance_info(self, info):
-        instances = [(x[0]) for x in info]
+        instances = [[x[0]] for x in info]
         query = "DELETE from aws_instances where host = ?"
         rows = self.execute_many(query, instances)
         LOGGER.debug("Deleted %d instance records", rows)

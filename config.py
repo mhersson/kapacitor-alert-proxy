@@ -11,6 +11,7 @@ Created by: Morten Hersson, <mhersson@gmail.com>
 
 class Config():
     # Server settings
+    SERVER_FQDN = "localhost"
     SERVER_ADDRESS = "0.0.0.0"
     SERVER_PORT = 9095
     SECRET_KEY = "Something-really-clever"

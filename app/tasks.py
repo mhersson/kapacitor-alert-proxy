@@ -142,6 +142,8 @@ class SlackAlertSummary():
         LOGGER.info("Initiating SlackAlertSummary")
         self.alertctrl = AlertController()
         self.db = DBController()
+        self.url = "http://" + \
+            app.config['SERVER_FQDN'] + "/kap/log?environment="
 
     def run(self):
         if int(time.time()) % 3600 <= 60:
@@ -158,7 +160,10 @@ class SlackAlertSummary():
                         s = x[1]
                     if x[0] == 'production':
                         p = x[1]
-                msg = "Test: {}, Staging: {}, Production: {}".format(t, s, p)
+                msg = ("<{url}test|Test>: {test}, "
+                       "<{url}staging|Staging>: {staging}, "
+                       "<{url}production|Production>: {production}".format(
+                           url=self.url, test=t, staging=s, production=p))
                 title = "Last hour alert statistics"
                 self.alertctrl.slack.post_message(title, msg)
 

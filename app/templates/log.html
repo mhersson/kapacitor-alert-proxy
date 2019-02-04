@@ -38,7 +38,7 @@
 	    {% endif %}
                 <td>{{ a[0] | ctime }}</td>
                 <td>{{ a[1] }}</td>
-                <td>{{ a[4] }}</td>
+                <td><a href="?environment={{ a[4] }}" style="color: #0d0d0d">{{ a[4] }}</a></td>
                 <td class="text-center">{{ a[2] | fontawesome | safe }}
 		  <span class="fas fa-arrow-right"
 			style="margin-left: 2px;margin-right: 2px;"></span>

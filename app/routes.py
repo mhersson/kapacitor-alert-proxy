@@ -123,7 +123,10 @@ def statistics():
 
 @app.route("/kap/log", methods=['GET'])
 def log():
+    environment = request.args.get('environment')
     records = db.get_log_records(12)
+    if environment:
+        records = db.get_log_records(12, environment)
     return render_template('log.html', title="Last 12 hours",
                            records=records, tzname=TZNAME)
 
