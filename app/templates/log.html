@@ -1,4 +1,5 @@
 {% extends "base.html" %} {% block main %}
+{% set order = [ "OK", "INFO", "WARNING", "CRITICAL" ] %}
 <div style="margin-top: 30px">
 
   <div style="height: 50px; text-align: center;">
@@ -16,13 +17,16 @@
         <h4>No records to show</h4>
     </div>
     {% else %}
+    <style>
+      td>span.fas { width: 1em !important }
+    </style>
     <table style="font-size: 14px" class="table table-sm table-bordered">
         <thead class="thead-dark">
             <tr class="table-danger">
                 <th style="width: 18%">Time</th>
                 <th>Alert id</th>
                 <th>Environment</th>
-                <th class="text-center" style="width: 6%">Level</th>
+                <th class="text-center" style="width: 12%">Level</th>
             </tr>
         </thead>
         <tbody>
@@ -39,11 +43,41 @@
                 <td>{{ a[0] | ctime }}</td>
                 <td>{{ a[1] }}</td>
                 <td><a href="?environment={{ a[4] }}" style="color: #0d0d0d">{{ a[4] }}</a></td>
-                <td class="text-center">{{ a[2] | fontawesome | safe }}
-		  <span class="fas fa-arrow-right"
-			style="margin-left: 2px;margin-right: 2px;"></span>
-                  {{ a[3] | fontawesome | safe }}
-		</td>
+                <td class="text-center {{a[2]}}-{{a[3]}}">
+      {% set arrow = { "direction": "" } %}
+      {%- for item in order %}
+        {%- if arrow.direction == "" %}
+          {%- if a[2] == item %}{# X #}
+            {{- item | fontawesome | safe }}
+            {%- if a[3] != a[2] %}
+              {%- set _ = arrow.update({"direction": "right"}) %}{# --> #}
+            {%- endif %}
+          {%- elif a[3] == item %}{# X <- #}
+            {{- item | fontawesome | safe }}
+            {%- set _ = arrow.update({"direction": "left"}) %}{# <-- -#}
+            <span class="fas fa-chevron-left a2 text-muted" style="width: 1em;"></span>
+          {%- else -%}
+            <span class="fas fa-ellipsis-h fade a3"></span><span class="fas fa-ellipsis-h fade"></span>
+          {%- endif %}
+        {%- else %}
+          {%- if a[3] == item %}{# --> X -#}
+            <span class="b1 fas fa-chevron-right text-muted" style="width: 1em;"></span>
+            {{- item | fontawesome | safe }}
+            {%- set _ = arrow.update({"direction": ""}) %}
+          {%- elif a[2] == item %}{# <-- #}
+            {{- item | fontawesome | safe }}
+            {%- set _ = arrow.update({"direction": ""}) %}
+          {%- else %}
+            {#- show arrow "line" -#}
+            {%- if arrow.direction == "right" -%}
+              <span class="fas fa-minus text-muted"></span><span class="fas fa-minus text-muted"></span>
+            {%- else -%}
+              <span class="fas fa-ellipsis-h text-muted"></span><span class="fas fa-ellipsis-h text-muted"></span>
+            {%- endif %}
+          {%- endif %}
+        {%- endif %}
+      {%- endfor %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
